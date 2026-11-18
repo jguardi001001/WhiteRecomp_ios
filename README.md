@@ -41,7 +41,7 @@ Put the launcher in a folder of its own. **Build** creates the game beside it.
 The **Options** tab is saved between sessions.
 
 - **Build options:** most options change how the game is compiled, so they take effect the next time you press **Build**.
-- **Game options:** **Shadow Resolution** and **Anti-Aliasing** are passed to the game when it starts. They take effect the next time you start the game, with no rebuild.
+- **Game options:** **Graphics** and **Memory** are passed to the game when it starts. They take effect the next time you start the game, with no rebuild.
 
 ### Compiler
 
@@ -69,7 +69,7 @@ Levels above 1 haven't measured faster than 1.
 
 - **Off** (default): the game prints nothing and, on Windows, opens no console window.
 - **On:** a console window with logs, plus:
-  - a **frame time counter** in the top right corner of the game window
+  - an **FPS counter** in the top right corner of the game window
   - stack traces if the game crashes or hangs
   - the profiler and tracing switches (environment variables starting with `XRC_`) for diagnosing problems
 
@@ -95,32 +95,47 @@ FINAL FANTASY XIII's cutscenes are Bink 2 videos, which the port can't play dire
 
 How many CPU threads movie conversion uses, both for **Convert Movies** and for background conversion while you play. The default is **1**, so conversion doesn't slow the game down. Raise it to make **Convert Movies** finish sooner. The maximum is your CPU count minus one.
 
-### Shadow Resolution
+### Graphics
 
-The size of the shadow maps, passed to the game as `-Shadow=N` exactly as the original launcher does. Takes effect the next time the game starts.
+A preset for shadows and anti-aliasing. Takes effect the next time the game starts.
 
-| Choice | Effect |
-| --- | --- |
-| Off (no shadows) | Shadow maps aren't drawn at all. Fastest; no shadows anywhere. |
-| 512 x 512 | Blurrier shadows, cheaper |
-| **1024 x 1024 (DEFAULT)** | The game's default |
-| 2048 x 2048 | Sharper shadows |
-| 4096 x 4096 | Sharper still, costlier |
-| 8192 x 8192 | The original launcher's maximum, for high-end GPUs |
+| Choice | Shadows | Anti-aliasing |
+| --- | --- | --- |
+| Ultrafast (Worst Quality) | Off | Off |
+| Fast | 512 x 512 | Off (1x FXAA) |
+| **Fancy (DEFAULT)** | 1024 x 1024, the game's default | 4x FXAA |
+| Ultrafancy | 8192 x 8192 | 8x FXAA |
+| Custom | As set below | As set below |
 
-### Anti-Aliasing (MSAA)
+**Custom** shows three more options under Graphics:
 
-Multisample anti-aliasing smooths jagged edges. It's passed to the game as `-MSAA=N`, exactly as the original launcher does, and takes effect the next time the game starts.
+- **Shadow Resolution:** the size of the shadow maps, passed to the game as `-Shadow=N` exactly as the original launcher does. **Off** draws no shadow maps at all (the fastest); 512 is blurrier and cheaper; 1024 is the game's default; 2048, 4096 and 8192 (the original launcher's maximum) are sharper and costlier.
+- **Anti-alias Method:**
+  - **FXAA** (default): a cheap smoothing filter on the 3D image, applied before the HUD is drawn so the HUD stays sharp.
+  - **MSAA:** the game's own multisampling, passed as `-MSAA=N` like the original launcher. Sharper on fine detail, but costly, especially on integrated GPUs.
+- **Anti-alias Quality:** **1x** (off), **2x**, **4x** (default) or **8x**. For FXAA, higher smooths longer edges; for MSAA it's the samples per pixel, and if your GPU can't do the count you pick, the game uses the most it supports.
 
-| Choice | Effect |
-| --- | --- |
-| Off | No anti-aliasing. Fastest. |
-| 2x | Light smoothing |
-| **4x (DEFAULT)** | The game's default |
-| 8x | Smoother |
-| 16x | Smoothest |
+### Memory
 
-If your GPU can't do the count you pick, the game uses the most it supports. Foliage and other cut-out textures also get smooth edges when MSAA is on.
+How much memory the game can address.
+
+- **4GB (Recommended)** (default): the address space a 4 GB-patched exe gets.
+- **2GB:** what the original, unpatched exe gets.
+
+### Link-Time Optimization
+
+- **Off** (default): each source file is optimized on its own. This is the faster Build.
+- **On:** the compiler also optimizes across files when it links the game (`-flto`), which can make the game a little faster. The Build takes noticeably longer.
+
+With Clang on Windows, this needs LLVM's linker (`ld.lld.exe`) next to `clang.exe`. In MSYS2 that's the `mingw-w64-ucrt-x86_64-lld` package. If it's missing, the launcher says so and builds without LTO. GCC, and Clang on Linux, need nothing extra.
+
+### Always on
+
+Every Build also uses these, with no option to turn them off:
+
+- **`-march=native`:** the game is compiled for your own CPU's instruction set, since the computer that builds it is the one that plays it. A game built on one computer may not run on an older CPU.
+- **Fast math (`-ffast-math -fno-associative-math`):** faster floating-point code. The parts of the translated code that must behave exactly like an x86 CPU (NaN checks, float compares, float-to-integer conversions) are written so fast math can't change them. Reassociation (regrouping sums) stays off, because it breaks the game's own rounding tricks: the title menu disappears. Other results may differ from the original in the last bits.
+- **On Linux:** the distributions' hardening defaults (position-independent executables, control-flow protection, stack protector) are turned off. They cost speed and protect nothing here.
 
 ### Experimental Optimizations
 

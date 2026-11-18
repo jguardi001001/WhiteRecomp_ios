@@ -363,10 +363,11 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	running := sync.atomic_load(&task.running)
 	active := !running
 	head, rest := ui.cut_top(r, px(g, 24))
-	label(g, g.font, running ? "The options can be changed once the current task has finished." : "Most apply at the next Build; Shadow Resolution and Anti-Aliasing the next time the game starts.", head, DIM)
+	label(g, g.font, running ? "The options can be changed once the current task has finished." : "Most apply at the next Build; Graphics and Memory the next time the game starts.", head, DIM)
 	_, rest = ui.cut_top(rest, px(g, 8))
-	nrows := 11
-	row_h := clamp((rest.h - px(g, 24)) / nrows, px(g, 40), px(g, 50))
+	custom := settings.graphics == GRAPHICS_CUSTOM
+	nrows := custom ? 15 : 12 // (the Custom graphics rows only under Custom)
+	row_h := clamp((rest.h - px(g, 24)) / 15, px(g, 34), px(g, 50)) // (the same height either way)
 	oc, _ := ui.cut_top(rest, nrows * row_h + px(g, 16))
 	card(g, oc)
 	oi := ui.inset_xy(oc, px(g, 20), px(g, 8))
@@ -374,11 +375,11 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	ctrl_w := px(g, 270)
 	changed := false
 	row := 0
-	next_row :: proc(g: ^Gui, oi: ui.Rect, row: ^int, row_h, label_w, ctrl_w: int, name: string) -> (whole, ctrl, note: ui.Rect) {
+	next_row :: proc(g: ^Gui, oi: ui.Rect, row: ^int, row_h, label_w, ctrl_w: int, name: string, indent := 0) -> (whole, ctrl, note: ui.Rect) {
 		y := oi.y + row^ * row_h
 		whole = {oi.x, y, oi.w, row_h}
-		if row^ > 0 {ren.draw_rect(g.dl, {oi.x, y, oi.w, 1}, CARD_BORDER)}
-		label(g, g.font, name, {oi.x, y, label_w, row_h}, TEXT)
+		if row^ > 0 {ren.draw_rect(g.dl, {oi.x + indent, y, oi.w - indent, 1}, CARD_BORDER)}
+		label(g, g.font, name, {oi.x + indent, y, label_w - indent, row_h}, indent > 0 ? DIM : TEXT)
 		ctrl = {oi.x + label_w, y + (row_h - px(g, 32)) / 2, ctrl_w, px(g, 32)}
 		note = {ctrl.x + ctrl_w + px(g, 16), y, oi.w - label_w - ctrl_w - px(g, 16), row_h}
 		row^ += 1
@@ -420,7 +421,7 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	{
 		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Debug & Profile Tools:")
 		if on, ch := toggle(g, ctrl, settings.tools, active); ch {settings.tools = on; changed = true}
-		label(g, g.small, settings.tools ? "Logs, tracing, the profiler and a frame time counter (console window)" : "Off: no console window, nothing printed", note, DIM)
+		label(g, g.small, settings.tools ? "Logs, tracing, the profiler and an FPS counter (console window)" : "Off: no console window, nothing printed", note, DIM)
 	}
 	// FPS
 	{
@@ -461,10 +462,23 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 		if n, ch := dropdown(g, "threads", ctrl, names, sel, active = active); ch {settings.convert_threads = n + 1; changed = true}
 		label(g, g.small, "CPU threads for converting (Convert Movies and in the background)", note, DIM)
 	}
-	// Shadow Resolution, Anti-Aliasing: the game's arguments (in its .cfg: no Build needed)
+	// Graphics: a preset of Shadow Resolution and Anti-aliasing, or Custom -- those, indented below it. The game's
+	// arguments (in its .cfg: no Build needed)
 	game_changed := false
 	{
-		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Shadow Resolution:")
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Graphics:")
+		names := GRAPHICS_NAMES
+		if n, ch := dropdown(g, "graphics", ctrl, names[:], clamp(settings.graphics, 0, GRAPHICS_CUSTOM), active = active); ch {
+			settings.graphics = n
+			graphics_apply()
+			changed = true; game_changed = true
+		}
+		notes := [5]string{"No shadows, no anti-aliasing: the fastest", "Low-resolution shadows, no anti-aliasing", "The game's shadows, 4x FXAA", "The sharpest shadows, 8x FXAA: costly on the GPU", "Shadows and anti-aliasing as set below"}
+		label(g, g.small, fmt.tprintf("%s; no Build needed", notes[clamp(settings.graphics, 0, GRAPHICS_CUSTOM)]), note, DIM)
+	}
+	IND := px(g, 24)
+	if custom {
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Shadow Resolution:", IND)
 		res := SHADOW_CHOICES
 		names := make([]string, len(res), context.temp_allocator)
 		sel := 2
@@ -473,16 +487,36 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 			if v == settings.shadow_res {sel = i}
 		}
 		if n, ch := dropdown(g, "shadow", ctrl, names, sel, active = active); ch {settings.shadow_res = res[n]; changed = true; game_changed = true}
-		label(g, g.small, "Sharper shadows cost GPU time; Off is the fastest. No Build needed", note, DIM)
+		label(g, g.small, "Sharper shadows cost GPU time; Off is the fastest", note, DIM)
 	}
-	{
-		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Anti-Aliasing (MSAA):")
-		ms := MSAA_CHOICES
-		names := []string{"Off", "2x", "4x (DEFAULT)", "8x", "16x"}
+	if custom {
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Anti-alias Method:", IND)
+		names := []string{"MSAA", "FXAA (DEFAULT)"}
+		if n, ch := dropdown(g, "aa_method", ctrl, names, settings.aa_fxaa ? 1 : 0, active = active); ch {settings.aa_fxaa = n == 1; changed = true; game_changed = true}
+		label(g, g.small, settings.aa_fxaa ? "A cheap filter on the 3D image (not the HUD)" : "Multisampling: costly on integrated GPUs", note, DIM)
+	}
+	if custom {
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Anti-alias Quality:", IND)
+		qs := AA_QUALITIES
+		names := []string{"1x (off)", "2x", "4x (DEFAULT)", "8x"}
 		sel := 2
-		for v, i in ms {if v == settings.msaa {sel = i}}
-		if n, ch := dropdown(g, "msaa", ctrl, names, sel, active = active); ch {settings.msaa = ms[n]; changed = true; game_changed = true}
-		label(g, g.small, "Smoother edges cost GPU time (up to what the GPU has); no Build needed", note, DIM)
+		for v, i in qs {if v == settings.aa_quality {sel = i}}
+		if n, ch := dropdown(g, "aa_quality", ctrl, names, sel, active = active); ch {settings.aa_quality = qs[n]; changed = true; game_changed = true}
+		label(g, g.small, settings.aa_fxaa ? "FXAA strength: higher smooths longer edges" : "Samples per pixel (up to what the GPU has)", note, DIM)
+	}
+	// Memory (in its .cfg: no Build needed)
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Memory:")
+		names := []string{"2GB", "4GB (Recommended)"}
+		if n, ch := dropdown(g, "memory", ctrl, names, settings.memory_2gb ? 0 : 1, active = active); ch {settings.memory_2gb = n == 0; changed = true; game_changed = true}
+		label(g, g.small, settings.memory_2gb ? "The 2 GB the original exe gets; no Build needed" : "The address space a 4 GB-patched exe gets; no Build needed", note, DIM)
+	}
+	// Link-Time Optimization
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Link-Time Optimization:")
+		if on, ch := toggle(g, ctrl, settings.lto, active); ch {settings.lto = on; changed = true}
+		lto_note := !settings.lto ? "Off: a faster Build" : lto_on() ? "On: optimizes across files (a much slower Build)" : "Needs LLVM's linker (lld) beside Clang: not found"
+		label(g, g.small, lto_note, note, settings.lto && !lto_on() ? WARN : DIM)
 	}
 	// Experimental Optimizations
 	{

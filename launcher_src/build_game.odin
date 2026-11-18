@@ -84,6 +84,7 @@ build_task :: proc(t: ^Task) {
 	append(&rt_flags, "-DXRC_VULKAN", "-I", pjoin({src, "vulkan", "include"}, context.temp_allocator))
 	when REFERENCE {append(&rt_flags, "-DXRC_REFERENCE")}
 	logf(t, "Options: %v", runtime_option_flags())
+	if settings.lto && !lto_on() {logf(t, "Link-Time Optimization is off for this build: Clang's needs LLVM's linker (ld.lld) beside it, and there is none.")}
 	if list, err := os.read_all_directory_by_path(pjoin({src, "gen", "src"}, context.temp_allocator), context.temp_allocator); err == nil {
 		for e in list {
 			if strings.has_suffix(e.name, ".c") {
@@ -208,6 +209,7 @@ build_task :: proc(t: ^Task) {
 	args := make([dynamic]string, context.temp_allocator)
 	append(&args, cc)
 	append(&args, ..arch_flags())
+	append(&args, ..link_option_flags())
 	append(&args, "-o", out_exe, strings.concatenate({"@", rsp_file}, context.temp_allocator))
 	// FFmpeg (static, in dependency order), then what it needs of the system
 	for l in ([]string{"libavformat.a", "libavcodec.a", "libswresample.a", "libavutil.a"}) {
@@ -261,5 +263,7 @@ write_cfg :: proc(gdir: string) -> bool {
 	}
 	fmt.sbprintf(&b, "XRC_GAME_ARGS=%s\n", game_args())
 	if settings.shadow_res == 0 {fmt.sbprintf(&b, "XRC_NO_SHADOWS=1\n")}
+	if settings.memory_2gb {fmt.sbprintf(&b, "XRC_GUEST_2GB=1\n")}
+	if settings.aa_fxaa && settings.aa_quality > 1 {fmt.sbprintf(&b, "XRC_FXAA=%d\n", settings.aa_quality)}
 	return os.write_entire_file(pjoin({gdir, GAME_NAME + ".cfg"}, context.temp_allocator), b.buf[:]) == nil
 }

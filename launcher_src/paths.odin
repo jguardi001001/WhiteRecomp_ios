@@ -80,9 +80,13 @@ Settings :: struct {
 	vulkan:          bool, // Graphics Driver: Vulkan, the default (else Direct3D 9, Windows only)
 	skip_movies:     bool, // Cutscenes: Auto-skip
 	convert_threads: int, // Cutscene Convert Threads
+	graphics:        int, // Graphics: a preset of the three below (GRAPHICS_PRESETS), or GRAPHICS_CUSTOM -- them as set
 	shadow_res:      int, // Shadow Resolution: the game's -Shadow=N (512 .. 8192; 0: Off -- no shadows, XRC_NO_SHADOWS)
-	msaa:            int, // Anti-Aliasing: the game's -MSAA=N (2 .. 16; 0: Off)
+	aa_fxaa:         bool, // Anti-alias Method: FXAA (a post-process at present: XRC_FXAA=quality in the .cfg, the game's -MSAA=0), else MSAA (the game's -MSAA=quality)
+	aa_quality:      int, // Anti-alias Quality: 1 (off), 2, 4, 8
 	experimental:    bool, // Experimental Optimizations: -DXRC_EXPERIMENTAL
+	lto:             bool, // Link-Time Optimization: -flto
+	memory_2gb:      bool, // Memory: 2 GB, as the original exe gets (XRC_GUEST_2GB=1 in the .cfg); else 4 GB
 }
 settings := Settings {
 	opt_level       = 1,
@@ -90,14 +94,16 @@ settings := Settings {
 	fps             = 60,
 	vulkan          = true,
 	convert_threads = 1,
+	graphics        = GRAPHICS_FANCY,
 	shadow_res      = 1024,
-	msaa            = 4,
+	aa_fxaa         = true,
+	aa_quality      = 4,
 }
 
 load_settings :: proc() {
 	d, err := os.read_entire_file(data_path("settings.txt"), context.temp_allocator)
 	if err != nil {return}
-	version := 1 // (settings_version: 2 since Vulkan became the default; a version 1 file's "vulkan 0" was the old default)
+	version := 1 // (settings_version: 2 since Vulkan became the default; a version 1 file's "vulkan 0" was the old default; 4 since Graphics)
 	for line in strings.split_lines(string(d), context.temp_allocator) {
 		k, _, v := strings.partition(strings.trim_space(line), " ")
 		if k == "settings_version" {version, _ = strconv.parse_int(strings.trim_space(v))}
@@ -129,15 +135,29 @@ load_settings :: proc() {
 			if n_ok && (n == 0 || (n >= 512 && n <= 8192)) {settings.shadow_res = n}
 		case "experimental":
 			settings.experimental = v == "1"
-		case "msaa":
-			if n_ok && (n == 0 || n == 2 || n == 4 || n == 8 || n == 16) {settings.msaa = n}
+		case "lto":
+			settings.lto = v == "1"
+		case "memory_2gb":
+			settings.memory_2gb = v == "1"
+		case "msaa": // (before version 3: MSAA only; Off kept, any other the new default, FXAA 4x)
+			if version < 3 && n_ok && n == 0 {settings.aa_quality = 1}
+		case "aa_method":
+			if version >= 3 {settings.aa_fxaa = v == "fxaa"}
+		case "aa_quality":
+			if version >= 3 && n_ok && (n == 1 || n == 2 || n == 4 || n == 8) {settings.aa_quality = n}
+		case "graphics":
+			keys := GRAPHICS_KEYS
+			for name, i in keys {if v == name {settings.graphics = i}}
 		}
 	}
+	// (before version 4, no Graphics: the preset the settings match, else Custom -- kept as they were)
+	if version < 4 {settings.graphics = graphics_matching()}
+	graphics_apply()
 }
 
 save_settings :: proc() {
 	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintf(&b, "settings_version 2\n")
+	fmt.sbprintf(&b, "settings_version 4\n")
 	fmt.sbprintf(&b, "game_dir %s\n", settings.game_dir)
 	fmt.sbprintf(&b, "compiler %s\n", settings.compiler)
 	fmt.sbprintf(&b, "opt_level %d\n", settings.opt_level)
@@ -147,8 +167,13 @@ save_settings :: proc() {
 	fmt.sbprintf(&b, "vulkan %d\n", settings.vulkan ? 1 : 0)
 	fmt.sbprintf(&b, "skip_movies %d\n", settings.skip_movies ? 1 : 0)
 	fmt.sbprintf(&b, "convert_threads %d\n", settings.convert_threads)
+	keys := GRAPHICS_KEYS
+	fmt.sbprintf(&b, "graphics %s\n", keys[clamp(settings.graphics, 0, GRAPHICS_CUSTOM)])
 	fmt.sbprintf(&b, "shadow_res %d\n", settings.shadow_res)
-	fmt.sbprintf(&b, "msaa %d\n", settings.msaa)
+	fmt.sbprintf(&b, "aa_method %s\n", settings.aa_fxaa ? "fxaa" : "msaa")
+	fmt.sbprintf(&b, "aa_quality %d\n", settings.aa_quality)
 	fmt.sbprintf(&b, "experimental %d\n", settings.experimental ? 1 : 0)
+	fmt.sbprintf(&b, "lto %d\n", settings.lto ? 1 : 0)
+	fmt.sbprintf(&b, "memory_2gb %d\n", settings.memory_2gb ? 1 : 0)
 	_ = os.write_entire_file(data_path("settings.txt"), b.buf[:])
 }
