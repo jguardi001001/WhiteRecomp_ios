@@ -149,7 +149,7 @@ compiler_candidates :: proc() -> [dynamic]string {
 				}
 			}
 		}
-		for p in ([]string{`C:\msys64\ucrt64\bin\gcc.exe`, `C:\msys64\mingw64\bin\gcc.exe`, `C:\msys64\clang64\bin\clang.exe`}) {
+		for p in ([]string{`C:\msys64\ucrt64\bin\gcc.exe`, `C:\msys64\mingw64\bin\gcc.exe`, `C:\msys64\ucrt64\bin\clang.exe`, `C:\msys64\clang64\bin\clang.exe`}) {
 			if file_exists(p) {append(&c, p)}
 		}
 	} else {

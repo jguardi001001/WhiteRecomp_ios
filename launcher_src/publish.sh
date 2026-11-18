@@ -1,6 +1,7 @@
 #!/bin/sh
 # launcher/publish.sh [REPO]               (WSL) the sources into the launcher's git repo
 # launcher/publish.sh release TAG [REPO]   (WSL; after launcher/build.sh all) a GitHub release of the launchers
+#                                          (REPLACE=1: every earlier release and its tag deleted first)
 # The repo (default C:\Users\psivstar\Documents\proj\WhiteRecomp; on GitHub ps4star/WhiteRecomp) holds:
 #   README.txt, THIRD_PARTY_LICENSES.txt   launcher/release/ (CRLF)
 #   launcher_src/                          the launcher's sources: launcher/ (without its bundle.bin) and shared/ (the
@@ -23,6 +24,19 @@ if [ "${1:-}" = release ]; then
 	TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | "$WINGIT" credential fill | sed -n 's/^password=//p')
 	[ -n "$TOKEN" ] || { echo "publish: not signed in to GitHub"; exit 1; }
 	SHA=$(cd "$REPO" && "$WINGIT" rev-parse origin/main | tr -d '\r')
+	if [ "${REPLACE:-0}" = 1 ]; then # REPLACE=1: every earlier release and its tag deleted first
+		curl -s -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/$GH_REPO/releases?per_page=100" |
+			sed -n 's/^    "id": \([0-9]*\),$/\1/p; s/^    "tag_name": "\(.*\)",$/T \1/p' | while read -r x y; do
+			if [ "$x" = T ]; then
+				curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/$GH_REPO/git/refs/tags/$y"
+				echo "deleted tag $y"
+			else
+				curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/$GH_REPO/releases/$x"
+				echo "deleted release $x"
+			fi
+		done
+		(cd "$REPO" && "$WINGIT" tag -l | tr -d '\r' | xargs -r "$WINGIT" tag -d > /dev/null)
+	fi
 	OUT=$(mktemp)
 	CODE=$(curl -s -o "$OUT" -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
 		"https://api.github.com/repos/$GH_REPO/releases" \
