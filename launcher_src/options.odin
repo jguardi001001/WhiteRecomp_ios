@@ -16,7 +16,7 @@
 //   Cutscene Convert Threads  -DXRC_MOVIE_THREADS=N: the CPUs and encoder threads of the background conversion;
 //                             Convert Movies (movies.odin) runs the converter with as many (--threads N)
 //   Graphics                  a preset of the three below (FXAA always): Ultrafast (no shadows, no anti-aliasing), Fast
-//                             (512 shadows, 1x FXAA: off), Fancy (the default: 1024, 4x FXAA), Ultrafancy (8192, 8x
+//                             (512 shadows, 2x FXAA), Fancy (the default: 1024, 4x FXAA), Ultrafancy (8192, 8x
 //                             FXAA); or Custom, which shows the three (indented) and keeps them as set
 //   Shadow Resolution         the game's own arguments, as the retail launcher passes them: -Shadow=512..8192 (the
 //   Anti-Aliasing             game's default 1024; Off: -Shadow=512 and XRC_NO_SHADOWS=1, nothing drawn into the
@@ -29,6 +29,13 @@
 //                             original exe gets (not large-address-aware): XRC_GUEST_2GB=1 in WhiteRecomp.cfg, no
 //                             Build needed (src/runtime/xrc_rt.h's layout)
 //   Experimental Optimizations -DXRC_EXPERIMENTAL: less-tested optimizations that may break things (xrc_rt.h)
+//   Profile-Guided Optimization  (Clang) -fprofile-instr-use=<the bundle's pgo/ff13.profdata> on every unit: the profile
+//                             of a play of the game (the project's tools/xrc_build.sh XRC_PGO: how it is made), so
+//                             the compiler lays out and inlines the code for how the game runs (~6% less main-thread
+//                             time a frame). Checked first on a small file (an older Clang may not read the profile's
+//                             format: then the Build goes on without it). On Windows linked with lld: GNU ld leaves
+//                             the profile's .llvm.call-graph-profile section below the image base, and Windows will
+//                             not start the game. Off with GCC, or on Windows without lld beside Clang.
 //   Link-Time Optimization    -flto (Clang: -flto=thin, on Windows linked with lld; GCC: -flto=auto): optimizing
 //                             across files
 // Always: -march=native (the build runs on the machine that plays it) and -ffast-math -fno-associative-math when
@@ -57,6 +64,7 @@ common_flags :: proc() -> []string {
 	append(&f, "-ffast-math", "-fno-associative-math") // (reassociation folds the game's own rounding tricks: a broken title menu)
 	when ODIN_OS == .Linux {append(&f, "-fno-pie", "-fcf-protection=none", "-fno-stack-protector")}
 	if lto_on() {append(&f, lto_flag())}
+	if pgo_profile != "" {append(&f, fmt.tprintf("-fprofile-instr-use=%s", pgo_profile))}
 	return f[:]
 }
 
@@ -67,8 +75,20 @@ link_option_flags :: proc() -> []string {
 	if lto_on() {
 		append(&f, lto_flag(), fmt.tprintf("-O%d", clamp(settings.opt_level, 0, 3)))
 		when ODIN_OS == .Windows {if compiler_is_clang() {append(&f, "-fuse-ld=lld")}}
+	} else if pgo_profile != "" {
+		when ODIN_OS == .Windows {append(&f, "-fuse-ld=lld")} // (see Profile-Guided Optimization above)
 	}
 	return f[:]
+}
+
+// Profile-Guided Optimization: the profile's path while a Build uses it (pgo_prepare), else ""
+pgo_profile: string
+
+// why Profile-Guided Optimization cannot be on with these settings ("": it can)
+pgo_blocked :: proc() -> string {
+	if !compiler_is_clang() {return "Needs Clang (GCC cannot read the profile)"}
+	when ODIN_OS == .Windows {if lld_path() == "" {return "Needs LLVM's linker (lld) beside Clang: not found"}}
+	return ""
 }
 
 lto_flag :: proc() -> string {return compiler_is_clang() ? "-flto=thin" : "-flto=auto"}
@@ -130,7 +150,7 @@ GRAPHICS_ULTRAFANCY :: 3
 GRAPHICS_CUSTOM :: 4
 GRAPHICS_PRESETS :: [4]Graphics_Preset {
 	{shadow_res = 0, aa_quality = 1}, // Ultrafast: no shadows, no anti-aliasing
-	{shadow_res = 512, aa_quality = 1}, // Fast: 512 shadows, 1x FXAA (off)
+	{shadow_res = 512, aa_quality = 2}, // Fast: 512 shadows, 2x FXAA
 	{shadow_res = 1024, aa_quality = 4}, // Fancy (the default: the game's own shadow size): 4x FXAA
 	{shadow_res = 8192, aa_quality = 8}, // Ultrafancy: the most of both
 }

@@ -366,8 +366,8 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	label(g, g.font, running ? "The options can be changed once the current task has finished." : "Most apply at the next Build; Graphics and Memory the next time the game starts.", head, DIM)
 	_, rest = ui.cut_top(rest, px(g, 8))
 	custom := settings.graphics == GRAPHICS_CUSTOM
-	nrows := custom ? 15 : 12 // (the Custom graphics rows only under Custom)
-	row_h := clamp((rest.h - px(g, 24)) / 15, px(g, 34), px(g, 50)) // (the same height either way)
+	nrows := custom ? 16 : 13 // (the Custom graphics rows only under Custom)
+	row_h := clamp((rest.h - px(g, 24)) / 16, px(g, 34), px(g, 50)) // (the same height either way)
 	oc, _ := ui.cut_top(rest, nrows * row_h + px(g, 16))
 	card(g, oc)
 	oi := ui.inset_xy(oc, px(g, 20), px(g, 8))
@@ -473,7 +473,7 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 			graphics_apply()
 			changed = true; game_changed = true
 		}
-		notes := [5]string{"No shadows, no anti-aliasing: the fastest", "Low-resolution shadows, no anti-aliasing", "The game's shadows, 4x FXAA", "The sharpest shadows, 8x FXAA: costly on the GPU", "Shadows and anti-aliasing as set below"}
+		notes := [5]string{"No shadows, no anti-aliasing: the fastest", "Low-resolution shadows, 2x FXAA", "The game's shadows, 4x FXAA", "The sharpest shadows, 8x FXAA: costly on the GPU", "Shadows and anti-aliasing as set below"}
 		label(g, g.small, fmt.tprintf("%s; no Build needed", notes[clamp(settings.graphics, 0, GRAPHICS_CUSTOM)]), note, DIM)
 	}
 	IND := px(g, 24)
@@ -510,6 +510,14 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 		names := []string{"2GB", "4GB (Recommended)"}
 		if n, ch := dropdown(g, "memory", ctrl, names, settings.memory_2gb ? 0 : 1, active = active); ch {settings.memory_2gb = n == 0; changed = true; game_changed = true}
 		label(g, g.small, settings.memory_2gb ? "The 2 GB the original exe gets; no Build needed" : "The address space a 4 GB-patched exe gets; no Build needed", note, DIM)
+	}
+	// Profile-Guided Optimization
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Profile-Guided Optimization:")
+		if on, ch := toggle(g, ctrl, settings.pgo, active); ch {settings.pgo = on; changed = true}
+		why := pgo_blocked()
+		pgo_note := !settings.pgo ? "Off: the game built without the profile" : why == "" ? "On: optimized for how the game runs (a faster game)" : why
+		label(g, g.small, pgo_note, note, settings.pgo && why != "" ? WARN : DIM)
 	}
 	// Link-Time Optimization
 	{

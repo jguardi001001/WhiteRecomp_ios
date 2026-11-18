@@ -102,7 +102,7 @@ A preset for shadows and anti-aliasing. Takes effect the next time the game star
 | Choice | Shadows | Anti-aliasing |
 | --- | --- | --- |
 | Ultrafast (Worst Quality) | Off | Off |
-| Fast | 512 x 512 | Off (1x FXAA) |
+| Fast | 512 x 512 | 2x FXAA |
 | **Fancy (DEFAULT)** | 1024 x 1024, the game's default | 4x FXAA |
 | Ultrafancy | 8192 x 8192 | 8x FXAA |
 | Custom | As set below | As set below |
@@ -121,6 +121,13 @@ How much memory the game can address.
 
 - **4GB (Recommended)** (default): the address space a 4 GB-patched exe gets.
 - **2GB:** what the original, unpatched exe gets.
+
+### Profile-Guided Optimization
+
+- **On** (default): the game is compiled with a profile recorded while playing it, so the compiler optimizes for how the game actually runs: about 6% less CPU time per frame on the game's main thread.
+- **Off:** built without the profile.
+
+It needs **Clang**; with GCC it's skipped. On Windows it also needs LLVM's linker (`ld.lld.exe`) next to `clang.exe` (MSYS2: the `mingw-w64-ucrt-x86_64-lld` package); the launcher says so if it's missing. If your Clang is too old to read the profile, the Build says so and goes on without it.
 
 ### Link-Time Optimization
 

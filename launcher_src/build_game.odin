@@ -55,10 +55,11 @@ build_task :: proc(t: ^Task) {
 
 	// 2. the sources
 	src := data_path("src")
-	n := bundle_extract(t, src, {"gen/", "runtime/", "include/", "ffmpeg/", "vulkan/"})
+	n := bundle_extract(t, src, {"gen/", "runtime/", "include/", "ffmpeg/", "vulkan/", "pgo/"})
 	if n < 0 {t.failed = true; return}
 	if cancelled(t) {return}
 	logf(t, "Sources: %s (%d files changed)", src, n)
+	pgo_prepare(t, cc, pjoin({src, "pgo", "ff13.profdata"}, context.temp_allocator))
 
 	// 3. compile
 	obj := data_path("obj")
@@ -115,8 +116,9 @@ build_task :: proc(t: ^Task) {
 
 	// the compiler and flags of the objects there, per kind (the pages / the runtime): different ones rebuild that
 	// kind (an option such as Audio rebuilds only the runtime; another compiler, everything)
-	page_stamp := fmt.tprintf("%s|%v|%v", cc, page_flags[:], REFERENCE)
-	rt_stamp := fmt.tprintf("%s|%v|%v", cc, rt_flags[:], REFERENCE)
+	pgo_t := pgo_profile != "" ? mtime(pgo_profile) : time.Time{} // (a new profile: everything again)
+	page_stamp := fmt.tprintf("%s|%v|%v|%v", cc, page_flags[:], REFERENCE, pgo_t)
+	rt_stamp := fmt.tprintf("%s|%v|%v|%v", cc, rt_flags[:], REFERENCE, pgo_t)
 	page_stamp_file := pjoin({obj, "pages.stamp"}, context.temp_allocator)
 	rt_stamp_file := pjoin({obj, "runtime.stamp"}, context.temp_allocator)
 	old_page, _ := os.read_entire_file(page_stamp_file, context.temp_allocator)
@@ -236,6 +238,28 @@ build_task :: proc(t: ^Task) {
 	_ = os.make_directory_all(data_path("cdrive"))
 	logf(t, "Built %s", out_exe)
 	set_status(t, 1, "Built")
+}
+
+// Profile-Guided Optimization (options.odin): pgo_profile set when this Build can use the profile -- the option on,
+// Clang (with lld on Windows), and the compiler reading it (a small file compiled with it first)
+@(private = "file")
+pgo_prepare :: proc(t: ^Task, cc, profile: string) {
+	pgo_profile = ""
+	if !settings.pgo {return}
+	if why := pgo_blocked(); why != "" {logf(t, "Profile-Guided Optimization is off for this build: %s.", why); return}
+	if !file_exists(profile) {logf(t, "Profile-Guided Optimization is off for this build: no profile in the bundle."); return}
+	obj := data_path("obj")
+	_ = os.make_directory_all(obj)
+	probe := pjoin({obj, "pgo_probe.c"}, context.temp_allocator)
+	_ = os.write_entire_file(probe, transmute([]u8)string("int pgo_probe(int x) { return x + 1; }\n"))
+	out := strings.builder_make(context.temp_allocator)
+	args := []string{cc, fmt.tprintf("-fprofile-instr-use=%s", profile), "-c", probe, "-o", pjoin({obj, "pgo_probe.o"}, context.temp_allocator)}
+	if code, started := run(t, args, mode = .Quiet, capture = &out); !started || code != 0 {
+		logf(t, "Profile-Guided Optimization is off for this build: this Clang cannot read the profile (an older version?).")
+		return
+	}
+	pgo_profile = strings.clone(profile)
+	logf(t, "Profile-Guided Optimization: %s", profile)
 }
 
 GAME_NAME :: "WhiteRecomp"

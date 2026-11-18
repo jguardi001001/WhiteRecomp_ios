@@ -2,7 +2,8 @@
 # launcher/build.sh [windows|linux|all] [odin build flags]   (WSL; default windows)
 # Builds the launcher: build/WhiteRecompLauncher_windows.exe (Windows), build/WhiteRecompLauncher_linux (Linux x86-64).
 #   1. packs what it carries into its bundle.bin (ff bundle): the translated code (build/xrc_gen: run
-#      tools/xrc_build.sh first), the runtime (src/runtime), xrc.h, the Vulkan headers (third_party/vulkan), FFmpeg's
+#      tools/xrc_build.sh first), the runtime (src/runtime), xrc.h, the Vulkan headers (third_party/vulkan), the
+#      profile for Profile-Guided Optimization (build/pgo/ff13.profdata: tools/xrc_build.sh XRC_PGO says how), FFmpeg's
 #      static libraries for the target with their headers and license (third_party/ffmpeg: the game links them, for
 #      the movies) and the movie converter (build/bink2mp4.exe: tools/bink2mp4/build.sh); Windows also the ffmpeg.exe it
 #      encodes with (third_party/ffmpeg_exe: a static GPL build, run as its own program). Each target has its own
@@ -34,7 +35,7 @@ for T in $TARGETS; do
 	rsync -a --delete --exclude bundle.bin launcher/ "$STAGE/launcher/" || exit 1
 	rsync -a --delete shared/ "$STAGE/shared/" || exit 1
 	if [ -z "${LAUNCHER_NO_BUNDLE:-}" ] || [ ! -f "$STAGE/launcher/bundle.bin" ]; then
-		for f in build/xrc_gen/xrc_table.c build/xrc_gen/match/match_table.c build/bink2mp4.exe third_party/ffmpeg/lib/$FFP/libavcodec.a; do
+		for f in build/xrc_gen/xrc_table.c build/xrc_gen/match/match_table.c build/bink2mp4.exe third_party/ffmpeg/lib/$FFP/libavcodec.a build/pgo/ff13.profdata; do
 			[ -f "$f" ] || { echo "launcher: $f is missing (build it first)"; exit 1; }
 		done
 		./build/ff.exe bundle --out "$(M "$STAGE/launcher/bundle.bin")" \
@@ -45,6 +46,7 @@ for T in $TARGETS; do
 			"$(M third_party/ffmpeg/COPYING.LGPLv2.1.txt)=ffmpeg/COPYING.LGPLv2.1.txt" \
 			"$(M third_party/ffmpeg/README.md)=ffmpeg/README.md" \
 			"$(M third_party/vulkan/include)=vulkan/include" \
+			"$(M build/pgo/ff13.profdata)=pgo/ff13.profdata" \
 			"$(M build/bink2mp4.exe)=tools/bink2mp4.exe" \
 			${FFEXE:+"$(M $FFEXE/ffmpeg.exe)=tools/ffmpeg.exe" "$(M $FFEXE/LICENSE)=tools/ffmpeg-LICENSE.txt" "$(M $FFEXE/README.txt)=tools/ffmpeg-README.txt"} || exit 1
 	fi

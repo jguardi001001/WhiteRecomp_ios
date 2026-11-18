@@ -86,6 +86,7 @@ Settings :: struct {
 	aa_quality:      int, // Anti-alias Quality: 1 (off), 2, 4, 8
 	experimental:    bool, // Experimental Optimizations: -DXRC_EXPERIMENTAL
 	lto:             bool, // Link-Time Optimization: -flto
+	pgo:             bool, // Profile-Guided Optimization (Clang): the bundled profile
 	memory_2gb:      bool, // Memory: 2 GB, as the original exe gets (XRC_GUEST_2GB=1 in the .cfg); else 4 GB
 }
 settings := Settings {
@@ -95,6 +96,7 @@ settings := Settings {
 	vulkan          = true,
 	convert_threads = 1,
 	graphics        = GRAPHICS_FANCY,
+	pgo             = true,
 	shadow_res      = 1024,
 	aa_fxaa         = true,
 	aa_quality      = 4,
@@ -137,6 +139,8 @@ load_settings :: proc() {
 			settings.experimental = v == "1"
 		case "lto":
 			settings.lto = v == "1"
+		case "pgo":
+			settings.pgo = v != "0"
 		case "memory_2gb":
 			settings.memory_2gb = v == "1"
 		case "msaa": // (before version 3: MSAA only; Off kept, any other the new default, FXAA 4x)
@@ -174,6 +178,7 @@ save_settings :: proc() {
 	fmt.sbprintf(&b, "aa_quality %d\n", settings.aa_quality)
 	fmt.sbprintf(&b, "experimental %d\n", settings.experimental ? 1 : 0)
 	fmt.sbprintf(&b, "lto %d\n", settings.lto ? 1 : 0)
+	fmt.sbprintf(&b, "pgo %d\n", settings.pgo ? 1 : 0)
 	fmt.sbprintf(&b, "memory_2gb %d\n", settings.memory_2gb ? 1 : 0)
 	_ = os.write_entire_file(data_path("settings.txt"), b.buf[:])
 }
