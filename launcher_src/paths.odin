@@ -77,7 +77,7 @@ Settings :: struct {
 	audio:           bool,
 	tools:           bool, // the debugging and profiling switches (XRC_PROFILE, XRC_TRACE_*, ...)
 	fps:             int, // 30 or 60
-	vulkan:          bool, // Graphics Driver: Vulkan (else Direct3D 9; Linux: Vulkan always)
+	vulkan:          bool, // Graphics Driver: Vulkan, the default (else Direct3D 9, Windows only)
 	skip_movies:     bool, // Cutscenes: Auto-skip
 	convert_threads: int, // Cutscene Convert Threads
 }
@@ -85,13 +85,18 @@ settings := Settings {
 	opt_level       = 1,
 	audio           = true,
 	fps             = 60,
-	vulkan          = ODIN_OS != .Windows,
+	vulkan          = true,
 	convert_threads = 1,
 }
 
 load_settings :: proc() {
 	d, err := os.read_entire_file(data_path("settings.txt"), context.temp_allocator)
 	if err != nil {return}
+	version := 1 // (settings_version: 2 since Vulkan became the default; a version 1 file's "vulkan 0" was the old default)
+	for line in strings.split_lines(string(d), context.temp_allocator) {
+		k, _, v := strings.partition(strings.trim_space(line), " ")
+		if k == "settings_version" {version, _ = strconv.parse_int(strings.trim_space(v))}
+	}
 	for line in strings.split_lines(string(d), context.temp_allocator) {
 		k, _, v := strings.partition(strings.trim_space(line), " ")
 		v = strings.trim_space(v)
@@ -110,7 +115,7 @@ load_settings :: proc() {
 		case "fps":
 			if n_ok && (n == 30 || n == 60) {settings.fps = n}
 		case "vulkan":
-			settings.vulkan = v == "1" || ODIN_OS != .Windows
+			if version >= 2 {settings.vulkan = v == "1" || ODIN_OS != .Windows}
 		case "skip_movies":
 			settings.skip_movies = v == "1"
 		case "convert_threads":
@@ -121,6 +126,7 @@ load_settings :: proc() {
 
 save_settings :: proc() {
 	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "settings_version 2\n")
 	fmt.sbprintf(&b, "game_dir %s\n", settings.game_dir)
 	fmt.sbprintf(&b, "compiler %s\n", settings.compiler)
 	fmt.sbprintf(&b, "opt_level %d\n", settings.opt_level)

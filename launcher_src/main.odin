@@ -414,10 +414,10 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	{
 		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Graphics Driver:")
 		when ODIN_OS == .Windows {
-			names := []string{"D3D9", "Vulkan"}
-			sel := settings.vulkan ? 1 : 0
-			if n, ch := dropdown(g, "gfx", ctrl, names, sel, active = active); ch {settings.vulkan = n == 1; changed = true}
-			label(g, g.small, sel == 0 ? "Windows' own Direct3D 9" : "The port's Vulkan renderer", note, DIM)
+			names := []string{"Vulkan (Recommended)", "D3D9"}
+			sel := settings.vulkan ? 0 : 1
+			if n, ch := dropdown(g, "gfx", ctrl, names, sel, active = active); ch {settings.vulkan = n == 0; changed = true}
+			label(g, g.small, sel == 0 ? "The port's Vulkan renderer" : "Windows' Direct3D 9: broken for now (stops after the first fight)", note, sel == 0 ? DIM : WARN)
 		} else {
 			_, _ = dropdown(g, "gfx", ctrl, {"Vulkan"}, 0, active = active) // (the only one there)
 			label(g, g.small, "The port's Vulkan renderer", note, DIM)

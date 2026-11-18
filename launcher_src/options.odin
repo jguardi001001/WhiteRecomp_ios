@@ -5,7 +5,9 @@
 //                             (the game's own audio engine is a silent stand-in that only keeps its time)
 //   Debug & Profile Tools     OFF: -DXRC_NO_TOOLS -- the XRC_PROFILE / XRC_TRACE_* / log switches cannot be turned on
 //   FPS                       -DXRC_FRAME_LIMIT=30|60
-//   Graphics Driver           Vulkan: -DXRC_VK_DEFAULT (Windows: instead of the system's Direct3D 9; elsewhere always)
+//   Graphics Driver           Vulkan, the default everywhere (the launcher always builds it in: -DXRC_VULKAN);
+//                             D3D9 (Windows only): -DXRC_D3D9_DEFAULT -- the system's Direct3D 9, which is broken
+//                             for now (the cutscene after the first fight never plays)
 //   Cutscenes                 Auto-skip: -DXRC_SKIP_MOVIES (every movie skipped; the background conversion goes on)
 //   Cutscene Convert Threads  -DXRC_MOVIE_THREADS=N: the CPUs and encoder threads of the background conversion;
 //                             Convert Movies (movies.odin) runs the converter with as many (--threads N)
@@ -39,7 +41,7 @@ runtime_option_flags :: proc() -> []string {
 	append(&f, fmt.tprintf("-DXRC_FRAME_LIMIT=%d", settings.fps == 30 ? 30 : 60))
 	if !settings.audio {append(&f, "-DXRC_NO_AUDIO")}
 	if !settings.tools {append(&f, "-DXRC_NO_TOOLS")}
-	if settings.vulkan || ODIN_OS != .Windows {append(&f, "-DXRC_VK_DEFAULT")}
+	if !settings.vulkan && ODIN_OS == .Windows {append(&f, "-DXRC_D3D9_DEFAULT")}
 	if settings.skip_movies {append(&f, "-DXRC_SKIP_MOVIES")}
 	append(&f, fmt.tprintf("-DXRC_MOVIE_THREADS=%d", clamp(settings.convert_threads, 1, max_convert_threads())))
 	return f[:]
