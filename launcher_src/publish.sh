@@ -66,6 +66,8 @@ cat > "$REPO/.gitignore" <<'GI'
 /WhiteRecomp.exe
 /WhiteRecomp
 /WhiteRecomp.cfg
+# what the game writes in the folder it runs from (its Vulkan pipeline cache)
+/vk_pipelines.bin
 # the launchers: on GitHub Releases (launcher/publish.sh release)
 /WhiteRecompLauncher_windows.exe
 /WhiteRecompLauncher_linux
