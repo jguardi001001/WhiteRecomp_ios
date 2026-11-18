@@ -1,6 +1,6 @@
 #!/bin/sh
 # launcher/build.sh [windows|linux|all] [odin build flags]   (WSL; default windows)
-# Builds the launcher: build/WhiteRecompLauncher.exe (Windows), build/WhiteRecompLauncher (Linux x86-64).
+# Builds the launcher: build/WhiteRecompLauncher_windows.exe (Windows), build/WhiteRecompLauncher_linux (Linux x86-64).
 #   1. packs what it carries into its bundle.bin (ff bundle): the translated code (build/xrc_gen: run
 #      tools/xrc_build.sh first), the runtime (src/runtime), xrc.h, the Vulkan headers (third_party/vulkan), FFmpeg's
 #      static libraries for the target with their headers and license (third_party/ffmpeg: the game links them, for
@@ -48,18 +48,18 @@ for T in $TARGETS; do
 	fi
 	case $T in
 	windows)
-		(cd "$STAGE" && "$ODIN" build launcher -out:WhiteRecompLauncher.exe -collection:shared=shared -subsystem:windows -o:speed "$@") || exit 1
-		cp "$STAGE/WhiteRecompLauncher.exe" build/WhiteRecompLauncher.exe
-		ls -la build/WhiteRecompLauncher.exe
+		(cd "$STAGE" && "$ODIN" build launcher -out:WhiteRecompLauncher_windows.exe -collection:shared=shared -subsystem:windows -o:speed "$@") || exit 1
+		cp "$STAGE/WhiteRecompLauncher_windows.exe" build/WhiteRecompLauncher_windows.exe
+		ls -la build/WhiteRecompLauncher_windows.exe
 		;;
 	linux)
 		STB="$ODIN_ROOT/vendor/stb/lib"
 		[ -f "$STB/stb_truetype.a" ] || { echo "launcher: $STB has no Linux stb libraries (run vendor/stb/src/build_stb.sh unix there)"; exit 1; }
 		rm -f "$STAGE/whiterecomp_linux.o"
 		(cd "$STAGE" && "$ODIN" build launcher -out:whiterecomp_linux.o -collection:shared=shared -target:linux_amd64 -build-mode:obj -o:speed "$@") || exit 1
-		gcc -o build/WhiteRecompLauncher "$STAGE/whiterecomp_linux.o" "$STB/stb_truetype.a" "$STB/stb_rect_pack.a" "$STB/stb_image.a" \
+		gcc -o build/WhiteRecompLauncher_linux "$STAGE/whiterecomp_linux.o" "$STB/stb_truetype.a" "$STB/stb_rect_pack.a" "$STB/stb_image.a" \
 			-l:libwayland-client.so.0 -lm -ldl -lpthread || exit 1
-		ls -la build/WhiteRecompLauncher
+		ls -la build/WhiteRecompLauncher_linux
 		;;
 	esac
 done

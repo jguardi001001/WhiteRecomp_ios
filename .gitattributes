@@ -1,5 +1,5 @@
 *.exe binary
-/WhiteRecompLauncher binary
+/WhiteRecompLauncher_linux binary
 *.ttf binary
 *.sh text eol=lf
 *.odin text eol=lf

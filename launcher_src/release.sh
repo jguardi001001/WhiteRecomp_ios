@@ -1,7 +1,7 @@
 #!/bin/sh
 # launcher/release.sh   -> dist/ff13-launcher-<platform>-<arch>.(zip | tar.gz)
 # Makes the release of the launcher for the system it runs on:
-#   WSL (Windows)  build/WhiteRecompLauncher.exe (launcher/build.sh: packs launcher/bundle.bin with ff bundle first)
+#   WSL (Windows)  build/WhiteRecompLauncher_windows.exe (launcher/build.sh: packs launcher/bundle.bin with ff bundle first)
 #                  -> dist/ff13-launcher-windows-x64.zip
 #   Linux          odin build (needs launcher/bundle.bin, made on Windows, and Odin's stb libraries built:
 #                  vendor/stb/src/build_stb.sh) -> dist/ff13-launcher-linux-x64.tar.gz
@@ -27,7 +27,7 @@ Linux)
 		D=dist/ff13-launcher-windows-x64
 		rm -rf "$D" "$D.zip"
 		mkdir -p "$D"
-		cp build/WhiteRecompLauncher.exe "$D/"
+		cp build/WhiteRecompLauncher_windows.exe "$D/"
 		cp $REL/README.txt $REL/THIRD_PARTY_LICENSES.txt "$D/"
 		sed -i 's/$/\r/' "$D/README.txt" "$D/THIRD_PARTY_LICENSES.txt"
 		WD=$(wslpath -w "$ROOT/dist")
