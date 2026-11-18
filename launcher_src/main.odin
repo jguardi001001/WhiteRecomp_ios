@@ -92,6 +92,13 @@ confirm_discard: bool
 no_compiler_dialog: int // 0 not decided yet, 1 showing, 2 closed
 log_scroll: int // lines up from the end
 frame_wheel: int // this frame's wheel steps
+game_running: bool // the game started by Run is running (game_windows.odin / game_posix.odin: start_game)
+
+// the built game beside the launcher (build_game.odin), "" if there is none yet
+built_game :: proc() -> string {
+	exe := pjoin({game_out_dir(), GAME_NAME + EXE_SUFFIX}, context.temp_allocator)
+	return file_exists(exe) ? exe : ""
+}
 
 main :: proc() {
 	quiet_child_errors()
@@ -210,9 +217,22 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	running := sync.atomic_load(&task.running)
 	gs := get_game()
 
-	// the buttons: the bottom right corner (Build the larger)
+	// the buttons: the bottom right corner (Build the larger; Run, green, at its right once the game is built)
 	bottom, top := ui.cut_bottom(r, px(g, 44))
 	_, top = ui.cut_bottom(top, px(g, 16))
+	exe := built_game()
+	playing := sync.atomic_load(&game_running)
+	if exe != "" {
+		run_r: ui.Rect
+		run_r, bottom = ui.cut_right(bottom, px(g, 120), px(g, 8))
+		run_r = ui.Rect{run_r.x, run_r.y, run_r.w, px(g, 44)}
+		if button(g, run_r, playing ? "Running…" : "Run", !running && !playing, f = g.bold, green = true) {
+			if !start_game(exe, game_out_dir()) {
+				task_start("Run", proc(t: ^Task) {logf(t, "Could not start %s.", built_game()); t.failed = true})
+			}
+		}
+		tooltip_zone(g, "run", run_r, playing ? "The game is running." : running ? "Wait for the current task to finish." : fmt.tprintf("Starts %s.", exe))
+	}
 	build_r, rest := ui.cut_right(bottom, px(g, 150), px(g, 8))
 	build_r = ui.Rect{build_r.x, build_r.y, build_r.w, px(g, 44)}
 	conv_r, rest2 := ui.cut_right(rest, px(g, 140), px(g, 8))
@@ -222,7 +242,7 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 
 	cc_ok := dep_get(.Compiler).path != ""
 	ff := dep_get(.FFmpeg)
-	can_build := !running && gs.ok && cc_ok
+	can_build := !running && gs.ok && cc_ok && !playing
 	can_convert := !running && gs.ok && ff.can_encode && gs.to_convert > 0 && ODIN_OS == .Windows
 	can_discard := !running && gs.ok && gs.discardable > 0
 	if button(g, disc_r, "Discard Movies", can_discard) {confirm_discard = true}
@@ -234,7 +254,7 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	}
 	// why a button cannot be pressed (or what it would do)
 	busy := running ? "Wait for the current task to finish." : ""
-	tooltip_zone(g, "build", build_r, busy != "" ? busy : !gs.ok ? "Needs the game: choose its folder." : !cc_ok ? "Needs a C compiler." : "Builds the game with the options of the Options tab.")
+	tooltip_zone(g, "build", build_r, busy != "" ? busy : playing ? "Close the game first: it cannot be rebuilt while it runs." : !gs.ok ? "Needs the game: choose its folder." : !cc_ok ? "Needs a C compiler." : "Builds the game with the options of the Options tab.")
 	conv_tip := ODIN_OS != .Windows ? "Converting the movies works on Windows only for now." : busy != "" ? busy : !gs.ok ? "Needs the game." : !ff.can_encode ? "Needs FFmpeg with its H.264 encoder (install it above)." : gs.to_convert == 0 ? "Every movie is converted." : fmt.tprintf("Converts the %d movies that have no MP4 yet (it can be cancelled and continued later).", gs.to_convert)
 	tooltip_zone(g, "convert", conv_r, conv_tip)
 	disc_tip := busy != "" ? busy : !gs.ok ? "Needs the game." : gs.discardable == 0 ? "Nothing to discard: no Bink movie has its MP4 yet." : fmt.tprintf("Frees %.1f GB: the Bink movies that have their MP4.", f64(gs.free_bytes) / 1e9)

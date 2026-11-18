@@ -31,6 +31,11 @@ ACCENT_DOWN :: ren.Color{49, 125, 197, 255}
 ACCENT_BORDER :: ren.Color{0, 80, 160, 255}
 ACCENT_OFF :: ren.Color{199, 199, 199, 255}
 GOOD :: ren.Color{15, 123, 15, 255}
+// the Run button's green
+GREEN :: ren.Color{16, 124, 16, 255}
+GREEN_HOT :: ren.Color{36, 138, 36, 255}
+GREEN_DOWN :: ren.Color{56, 150, 56, 255}
+GREEN_BORDER :: ren.Color{10, 100, 10, 255}
 BAD :: ren.Color{196, 43, 28, 255}
 WARN :: ren.Color{157, 93, 0, 255}
 LOG_BG :: ren.Color{255, 255, 255, 255}
@@ -196,14 +201,17 @@ paragraph :: proc(g: ^Gui, f: ^ren.Font, s: string, r: ui.Rect, c: ren.Color, ga
 }
 
 // ---------------------------------------------------------------------------------------------- controls
-button :: proc(g: ^Gui, r: ui.Rect, text: string, enabled := true, primary := false, f: ^ren.Font = nil) -> bool {
+button :: proc(g: ^Gui, r: ui.Rect, text: string, enabled := true, primary := false, f: ^ren.Font = nil, green := false) -> bool {
 	f := f if f != nil else g.font
 	ok := enabled && live(g)
 	hot := ok && inside(r, g.mouse)
 	rad := px(g, 4)
 	tc := TEXT
 	if !enabled {
-		if primary {fill_round(g, r, rad, ACCENT_OFF); tc = WIN_BG} else {round_box(g, r, rad, DIS_FILL, DIS_BORDER); tc = FAINT}
+		if primary || green {fill_round(g, r, rad, ACCENT_OFF); tc = WIN_BG} else {round_box(g, r, rad, DIS_FILL, DIS_BORDER); tc = FAINT}
+	} else if green {
+		round_box(g, r, rad, hot ? (g.down ? GREEN_DOWN : GREEN_HOT) : GREEN, GREEN_BORDER)
+		tc = ren.WHITE
 	} else if primary {
 		round_box(g, r, rad, hot ? (g.down ? ACCENT_DOWN : ACCENT_HOT) : ACCENT, ACCENT_BORDER)
 		tc = ren.WHITE
