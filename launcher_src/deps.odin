@@ -297,6 +297,13 @@ ffmpeg_candidates :: proc() -> [dynamic]string {
 @(private = "file")
 check_ffmpeg :: proc(t: ^Task) -> Dep {
 	d := Dep{name = "FFmpeg", purpose = "converts the movies (the game plays them without it)"}
+	// the launcher's own (the Windows bundle: tools/ffmpeg.exe, unpacked with the converter by Build and Convert Movies)
+	if bundle_has("tools/ffmpeg.exe") {
+		d.path = strings.clone(data_path("tools", "ffmpeg.exe"))
+		d.note = "included with the launcher"
+		d.can_encode = true
+		return d
+	}
 	fallback := ""
 	for p in ffmpeg_candidates() {
 		out := strings.builder_make(context.temp_allocator)

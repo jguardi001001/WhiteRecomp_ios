@@ -3,7 +3,8 @@
 //   Optimization Level        -O0 (the fastest build, the slowest game) .. -O3; 1 is the default
 //   Audio                     OFF: -DXRC_NO_AUDIO -- no sound output, no mixing, no movie audio thread, no XAudio2
 //                             (the game's own audio engine is a silent stand-in that only keeps its time)
-//   Debug & Profile Tools     OFF: -DXRC_NO_TOOLS -- the XRC_PROFILE / XRC_TRACE_* / log switches cannot be turned on
+//   Debug & Profile Tools     OFF: -DXRC_NO_TOOLS -- the XRC_PROFILE / XRC_TRACE_* / log switches cannot be turned on,
+//                             nothing is printed (src/runtime/xrc_quiet.h) and on Windows there is no console window
 //   FPS                       -DXRC_FRAME_LIMIT=30|60
 //   Graphics Driver           Vulkan, the default everywhere (the launcher always builds it in: -DXRC_VULKAN);
 //                             D3D9 (Windows only): -DXRC_D3D9_DEFAULT -- the system's Direct3D 9, which is broken

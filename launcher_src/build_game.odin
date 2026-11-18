@@ -121,12 +121,23 @@ build_task :: proc(t: ^Task) {
 	old_page, _ := os.read_entire_file(page_stamp_file, context.temp_allocator)
 	old_rt, _ := os.read_entire_file(rt_stamp_file, context.temp_allocator)
 	same_page, same_rt := string(old_page) == page_stamp, string(old_rt) == rt_stamp
+	// the headers an object depends on: the pages only xrc.h; the runtime, the table and the matched functions also
+	// the runtime's own (src/runtime/*.h: a change there rebuilds them all)
 	header := mtime(pjoin({inc, "xrc.h"}, context.temp_allocator))
+	rt_header := header
+	if hs, err := os.read_all_directory_by_path(rt, context.temp_allocator); err == nil {
+		for h in hs {
+			if strings.has_suffix(h.name, ".h") && time.diff(rt_header, h.modification_time) > 0 {rt_header = h.modification_time}
+		}
+	}
 	todo := make([dynamic]Unit, context.temp_allocator)
 	for u in units {
 		ot := mtime(u.obj)
-		same := same_rt if raw_data(u.flags) == raw_data(rt_flags[:]) else same_page
-		if same && time.diff(mtime(u.src), ot) > 0 && time.diff(header, ot) > 0 {continue}
+		is_page := raw_data(u.flags) == raw_data(page_flags[:])
+		same := same_page if is_page else same_rt
+		if raw_data(u.flags) != raw_data(rt_flags[:]) && !is_page {same = same_page} // (the matched functions: the page flags' kind)
+		hdr := header if is_page else rt_header
+		if same && time.diff(mtime(u.src), ot) > 0 && time.diff(hdr, ot) > 0 {continue}
 		append(&todo, u)
 	}
 	_ = os.remove(page_stamp_file) // (until this build's objects are all made)
@@ -204,6 +215,9 @@ build_task :: proc(t: ^Task) {
 	}
 	append(&args, ..FFMPEG_SYS_LIBS)
 	append(&args, ..link_libs())
+	// Debug & Profile Tools OFF: nothing is printed (xrc_quiet.h), so no console window either (a GUI program; its
+	// entry point stays main)
+	when ODIN_OS == .Windows {if !settings.tools {append(&args, "-Wl,--subsystem,windows")}}
 	if code, started := run(t, args[:]); !started || code != 0 {
 		log_line(t, "Linking failed.")
 		when ODIN_OS == .Windows {logf(t, "(If WhiteRecomp is running, close it and Build again: Windows cannot replace a running program.)")}

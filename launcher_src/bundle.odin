@@ -1,6 +1,7 @@
 // The sources the launcher carries: launcher/bundle.bin, made by `ff bundle` (tools/ff/bundle.odin has the format),
 // embedded at compile time. What is in it: the translated code (gen/src/page_*.c, gen/xrc_table.c), the runtime
-// (runtime/), its header (include/xrc.h) and the movie converter (tools/bink2mp4.exe). Nothing of the game itself:
+// (runtime/), its header (include/xrc.h) and the movie converter (tools/bink2mp4.exe; Windows: with the ffmpeg.exe it
+// encodes with, tools/ffmpeg.exe, GPL: third_party/ffmpeg_exe). Nothing of the game itself:
 // its data comes from the player's own ffxiiiimg.exe and install.
 package launcher
 
@@ -45,6 +46,11 @@ bundle_open :: proc() -> bool {
 		append(&bundle_entries, e)
 	}
 	return true
+}
+
+bundle_has :: proc(path: string) -> bool {
+	for e in bundle_entries {if e.path == path {return true}}
+	return false
 }
 
 // One file of the bundle, unpacked (in the allocator).

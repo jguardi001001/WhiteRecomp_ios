@@ -4,7 +4,8 @@
 #   1. packs what it carries into its bundle.bin (ff bundle): the translated code (build/xrc_gen: run
 #      tools/xrc_build.sh first), the runtime (src/runtime), xrc.h, the Vulkan headers (third_party/vulkan), FFmpeg's
 #      static libraries for the target with their headers and license (third_party/ffmpeg: the game links them, for
-#      the movies) and the movie converter (build/bink2mp4.exe: tools/bink2mp4/build.sh). Each target has its own
+#      the movies) and the movie converter (build/bink2mp4.exe: tools/bink2mp4/build.sh); Windows also the ffmpeg.exe it
+#      encodes with (third_party/ffmpeg_exe: a static GPL build, run as its own program). Each target has its own
 #      bundle (their FFmpeg libraries differ), kept in its staging folder.
 #   2. odin build, with the iv_* libraries of shared/ as the `shared` collection. odin.exe cannot build on a
 #      \\wsl.localhost path, so the packages are staged under the Windows %TEMP% (like tools/ff/build.sh).
@@ -26,8 +27,8 @@ WTEMP=$(cmd.exe /c 'echo %TEMP%' 2>/dev/null | tr -d '\r')
 
 for T in $TARGETS; do
 	case $T in
-	windows) FFP=windows_amd64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_build" ;;
-	linux) FFP=linux_amd64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_linux" ;;
+	windows) FFP=windows_amd64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_build"; FFEXE=third_party/ffmpeg_exe/windows_amd64 ;;
+	linux) FFP=linux_amd64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_linux"; FFEXE="" ;;
 	esac
 	mkdir -p "$STAGE/launcher"
 	rsync -a --delete --exclude bundle.bin launcher/ "$STAGE/launcher/" || exit 1
@@ -44,7 +45,8 @@ for T in $TARGETS; do
 			"$(M third_party/ffmpeg/COPYING.LGPLv2.1.txt)=ffmpeg/COPYING.LGPLv2.1.txt" \
 			"$(M third_party/ffmpeg/README.md)=ffmpeg/README.md" \
 			"$(M third_party/vulkan/include)=vulkan/include" \
-			"$(M build/bink2mp4.exe)=tools/bink2mp4.exe" || exit 1
+			"$(M build/bink2mp4.exe)=tools/bink2mp4.exe" \
+			${FFEXE:+"$(M $FFEXE/ffmpeg.exe)=tools/ffmpeg.exe" "$(M $FFEXE/LICENSE)=tools/ffmpeg-LICENSE.txt" "$(M $FFEXE/README.txt)=tools/ffmpeg-README.txt"} || exit 1
 	fi
 	case $T in
 	windows)
