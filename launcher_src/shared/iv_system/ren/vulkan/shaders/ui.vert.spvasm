@@ -1,0 +1,67 @@
+; The vertex shader (see ui.vert for the GLSL): pixels -> clip space with a scale and an offset from push constants.
+;   gl_Position = vec4(pos * pc.scale + pc.offset, 0, 1)
+
+OpCapability Shader
+OpMemoryModel Logical GLSL450
+OpEntryPoint Vertex %main "main" %inPos %inUV %inColor %outUV %outColor %out
+
+OpDecorate %inPos Location 0
+OpDecorate %inUV Location 1
+OpDecorate %inColor Location 2
+OpDecorate %outUV Location 0
+OpDecorate %outColor Location 1
+OpDecorate %PerVertex Block
+OpMemberDecorate %PerVertex 0 BuiltIn Position
+OpDecorate %PC Block
+OpMemberDecorate %PC 0 Offset 0
+OpMemberDecorate %PC 1 Offset 8
+
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%float = OpTypeFloat 32
+%int = OpTypeInt 32 1
+%v2 = OpTypeVector %float 2
+%v4 = OpTypeVector %float 4
+%PerVertex = OpTypeStruct %v4
+%PC = OpTypeStruct %v2 %v2
+%p_in_v2 = OpTypePointer Input %v2
+%p_in_v4 = OpTypePointer Input %v4
+%p_out_v2 = OpTypePointer Output %v2
+%p_out_v4 = OpTypePointer Output %v4
+%p_out_pv = OpTypePointer Output %PerVertex
+%p_pc = OpTypePointer PushConstant %PC
+%p_pc_v2 = OpTypePointer PushConstant %v2
+
+%inPos = OpVariable %p_in_v2 Input
+%inUV = OpVariable %p_in_v2 Input
+%inColor = OpVariable %p_in_v4 Input
+%outUV = OpVariable %p_out_v2 Output
+%outColor = OpVariable %p_out_v4 Output
+%out = OpVariable %p_out_pv Output
+%pc = OpVariable %p_pc PushConstant
+
+%c0 = OpConstant %int 0
+%c1 = OpConstant %int 1
+%f0 = OpConstant %float f32:0.0
+%f1 = OpConstant %float f32:1.0
+
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%pos = OpLoad %v2 %inPos
+%scale_p = OpAccessChain %p_pc_v2 %pc %c0
+%scale = OpLoad %v2 %scale_p
+%offset_p = OpAccessChain %p_pc_v2 %pc %c1
+%offset = OpLoad %v2 %offset_p
+%scaled = OpFMul %v2 %pos %scale
+%moved = OpFAdd %v2 %scaled %offset
+%x = OpCompositeExtract %float %moved 0
+%y = OpCompositeExtract %float %moved 1
+%clip = OpCompositeConstruct %v4 %x %y %f0 %f1
+%position_p = OpAccessChain %p_out_v4 %out %c0
+OpStore %position_p %clip
+%uv = OpLoad %v2 %inUV
+OpStore %outUV %uv
+%col = OpLoad %v4 %inColor
+OpStore %outColor %col
+OpReturn
+OpFunctionEnd

@@ -1,0 +1,6 @@
+The fonts in this folder are built into programs that import ren_assets (see builtin.odin). All three are under the SIL Open Font License,
+Version 1.1; the license text is in OFL-1.1.txt (a font may be used, embedded and redistributed with programs, but not sold on its own).
+
+LiberationSans-Bold.ttf   Liberation Sans Bold (Liberation fonts 2.x), (c) Red Hat, Inc. / Google; the font of the PlanCol editors.
+NotoSans-Regular.ttf      Noto Sans Regular, (c) The Noto Project Authors.
+Orbitron-Bold.ttf         Orbitron Bold, Copyright (c) 2009, Matt McInerney <matt@pixelspread.com> (a futuristic face: it suits the neon effect).

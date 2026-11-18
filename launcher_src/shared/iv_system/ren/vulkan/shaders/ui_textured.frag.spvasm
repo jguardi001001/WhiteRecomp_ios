@@ -1,0 +1,41 @@
+; Material .Solid and .Textured (Solid samples a 1x1 white texture): color = vertex color * texture.
+; See ui_textured.frag for the GLSL.
+
+OpCapability Shader
+OpMemoryModel Logical GLSL450
+OpEntryPoint Fragment %main "main" %inUV %inColor %outColor
+OpExecutionMode %main OriginUpperLeft
+
+OpDecorate %inUV Location 0
+OpDecorate %inColor Location 1
+OpDecorate %outColor Location 0
+OpDecorate %tex DescriptorSet 0
+OpDecorate %tex Binding 0
+
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%float = OpTypeFloat 32
+%v2 = OpTypeVector %float 2
+%v4 = OpTypeVector %float 4
+%img = OpTypeImage %float 2D 0 0 0 1 Unknown
+%simg = OpTypeSampledImage %img
+%p_uc_simg = OpTypePointer UniformConstant %simg
+%p_in_v2 = OpTypePointer Input %v2
+%p_in_v4 = OpTypePointer Input %v4
+%p_out_v4 = OpTypePointer Output %v4
+
+%inUV = OpVariable %p_in_v2 Input
+%inColor = OpVariable %p_in_v4 Input
+%outColor = OpVariable %p_out_v4 Output
+%tex = OpVariable %p_uc_simg UniformConstant
+
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%uv = OpLoad %v2 %inUV
+%col = OpLoad %v4 %inColor
+%t = OpLoad %simg %tex
+%s = OpImageSampleImplicitLod %v4 %t %uv
+%r = OpFMul %v4 %col %s
+OpStore %outColor %r
+OpReturn
+OpFunctionEnd

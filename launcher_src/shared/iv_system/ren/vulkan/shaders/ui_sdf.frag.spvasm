@@ -1,0 +1,53 @@
+; Material .Sdf: a one-channel signed distance field (0.5 at the edge, more inside), smoothed over one pixel.
+;   d = texture.r; w = max(fwidth(d), 0.0001); alpha = vertex.a * smoothstep(0.5 - w, 0.5 + w, d)
+; See ui_sdf.frag for the GLSL.
+
+OpCapability Shader
+%glsl = OpExtInstImport "GLSL.std.450"
+OpMemoryModel Logical GLSL450
+OpEntryPoint Fragment %main "main" %inUV %inColor %outColor
+OpExecutionMode %main OriginUpperLeft
+
+OpDecorate %inUV Location 0
+OpDecorate %inColor Location 1
+OpDecorate %outColor Location 0
+OpDecorate %tex DescriptorSet 0
+OpDecorate %tex Binding 0
+
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%float = OpTypeFloat 32
+%v2 = OpTypeVector %float 2
+%v4 = OpTypeVector %float 4
+%img = OpTypeImage %float 2D 0 0 0 1 Unknown
+%simg = OpTypeSampledImage %img
+%p_uc_simg = OpTypePointer UniformConstant %simg
+%p_in_v2 = OpTypePointer Input %v2
+%p_in_v4 = OpTypePointer Input %v4
+%p_out_v4 = OpTypePointer Output %v4
+%half = OpConstant %float f32:0.5
+%eps = OpConstant %float f32:0.0001
+
+%inUV = OpVariable %p_in_v2 Input
+%inColor = OpVariable %p_in_v4 Input
+%outColor = OpVariable %p_out_v4 Output
+%tex = OpVariable %p_uc_simg UniformConstant
+
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%uv = OpLoad %v2 %inUV
+%col = OpLoad %v4 %inColor
+%t = OpLoad %simg %tex
+%s = OpImageSampleImplicitLod %v4 %t %uv
+%d = OpCompositeExtract %float %s 0
+%w0 = OpFwidth %float %d
+%w = OpExtInst %float %glsl FMax %w0 %eps
+%lo = OpFSub %float %half %w
+%hi = OpFAdd %float %half %w
+%smooth = OpExtInst %float %glsl SmoothStep %lo %hi %d
+%alpha = OpCompositeExtract %float %col 3
+%a = OpFMul %float %alpha %smooth
+%r = OpCompositeInsert %v4 %a %col 3
+OpStore %outColor %r
+OpReturn
+OpFunctionEnd

@@ -1,0 +1,44 @@
+; Material .Coverage: a one-channel texture is the alpha. color = vec4(vertex.rgb, vertex.a * texture.r).
+; See ui_coverage.frag for the GLSL.
+
+OpCapability Shader
+OpMemoryModel Logical GLSL450
+OpEntryPoint Fragment %main "main" %inUV %inColor %outColor
+OpExecutionMode %main OriginUpperLeft
+
+OpDecorate %inUV Location 0
+OpDecorate %inColor Location 1
+OpDecorate %outColor Location 0
+OpDecorate %tex DescriptorSet 0
+OpDecorate %tex Binding 0
+
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%float = OpTypeFloat 32
+%v2 = OpTypeVector %float 2
+%v4 = OpTypeVector %float 4
+%img = OpTypeImage %float 2D 0 0 0 1 Unknown
+%simg = OpTypeSampledImage %img
+%p_uc_simg = OpTypePointer UniformConstant %simg
+%p_in_v2 = OpTypePointer Input %v2
+%p_in_v4 = OpTypePointer Input %v4
+%p_out_v4 = OpTypePointer Output %v4
+
+%inUV = OpVariable %p_in_v2 Input
+%inColor = OpVariable %p_in_v4 Input
+%outColor = OpVariable %p_out_v4 Output
+%tex = OpVariable %p_uc_simg UniformConstant
+
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%uv = OpLoad %v2 %inUV
+%col = OpLoad %v4 %inColor
+%t = OpLoad %simg %tex
+%s = OpImageSampleImplicitLod %v4 %t %uv
+%coverage = OpCompositeExtract %float %s 0
+%alpha = OpCompositeExtract %float %col 3
+%a = OpFMul %float %alpha %coverage
+%r = OpCompositeInsert %v4 %a %col 3
+OpStore %outColor %r
+OpReturn
+OpFunctionEnd

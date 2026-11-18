@@ -1,0 +1,5 @@
+*.exe binary
+/WhiteRecompLauncher binary
+*.ttf binary
+*.sh text eol=lf
+*.odin text eol=lf

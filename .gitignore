@@ -1,0 +1,7 @@
+# what the launcher makes beside itself (Build)
+/WhiteRecomp.exe
+/WhiteRecomp
+/WhiteRecomp.cfg
+# made by build.sh, embedded in the launchers
+bundle.bin
+*.o
