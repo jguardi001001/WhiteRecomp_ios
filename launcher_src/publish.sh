@@ -1,20 +1,47 @@
 #!/bin/sh
-# launcher/publish.sh [REPO]   (WSL; after launcher/build.sh all)
-# Copies the launcher into its git repo (default C:\Users\psivstar\Documents\proj\WhiteRecomp), which holds:
-#   WhiteRecompLauncher_windows.exe, WhiteRecompLauncher_linux   the Windows and Linux launchers (build/)
-#   README.txt, THIRD_PARTY_LICENSES.txt            launcher/release/ (CRLF)
-#   launcher_src/                                   the launcher's sources: launcher/ (without its bundle.bin) and
-#                                                   shared/ (the iv_* libraries) as launcher_src/shared/
+# launcher/publish.sh [REPO]               (WSL) the sources into the launcher's git repo
+# launcher/publish.sh release TAG [REPO]   (WSL; after launcher/build.sh all) a GitHub release of the launchers
+# The repo (default C:\Users\psivstar\Documents\proj\WhiteRecomp; on GitHub ps4star/WhiteRecomp) holds:
+#   README.txt, THIRD_PARTY_LICENSES.txt   launcher/release/ (CRLF)
+#   launcher_src/                          the launcher's sources: launcher/ (without its bundle.bin) and shared/ (the
+#                                          iv_* libraries) as launcher_src/shared/
+# The launchers themselves are not in the repo but on its GitHub Releases: `release TAG` makes release TAG at the
+# commit pushed last (origin/main: commit and push first) and uploads build/WhiteRecompLauncher_windows.exe and
+# build/WhiteRecompLauncher_linux to it, signed in through Windows Git's credential manager (ps4star).
 # Each launcher builds the game beside itself (WhiteRecomp(.exe) and WhiteRecomp.cfg: the repo's .gitignore).
-# It does not commit: git status / git commit in the repo.
+# The sources step does not commit: git status / git commit in the repo.
 set -eu
 cd "$(dirname "$0")/.."
+GH_REPO=ps4star/WhiteRecomp
+WINGIT="/mnt/c/Program Files/Git/cmd/git.exe"
+if [ "${1:-}" = release ]; then
+	TAG=${2:?usage: launcher/publish.sh release TAG [REPO]}
+	REPO=${3:-/mnt/c/Users/psivstar/Documents/proj/WhiteRecomp}
+	for f in build/WhiteRecompLauncher_windows.exe build/WhiteRecompLauncher_linux; do
+		[ -f "$f" ] || { echo "publish: $f is missing (launcher/build.sh all)"; exit 1; }
+	done
+	TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | "$WINGIT" credential fill | sed -n 's/^password=//p')
+	[ -n "$TOKEN" ] || { echo "publish: not signed in to GitHub"; exit 1; }
+	SHA=$(cd "$REPO" && "$WINGIT" rev-parse origin/main | tr -d '\r')
+	OUT=$(mktemp)
+	CODE=$(curl -s -o "$OUT" -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+		"https://api.github.com/repos/$GH_REPO/releases" \
+		-d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"$SHA\",\"name\":\"WhiteRecomp $TAG\",\"body\":\"Download the launcher for your system: WhiteRecompLauncher_windows.exe (Windows) or WhiteRecompLauncher_linux (Linux x86-64; chmod +x it). Put it in a folder of its own: Build makes the game beside it. See README.txt.\"}")
+	[ "$CODE" = 201 ] || { echo "publish: creating release $TAG failed ($CODE):"; cat "$OUT"; rm -f "$OUT"; exit 1; }
+	ID=$(sed -n 's/^  "id": \([0-9]*\),$/\1/p' "$OUT" | head -1)
+	rm -f "$OUT"
+	for f in build/WhiteRecompLauncher_windows.exe build/WhiteRecompLauncher_linux; do
+		n=$(basename "$f")
+		CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/octet-stream" \
+			--data-binary "@$f" "https://uploads.github.com/repos/$GH_REPO/releases/$ID/assets?name=$n")
+		[ "$CODE" = 201 ] || { echo "publish: uploading $n failed ($CODE)"; exit 1; }
+		echo "uploaded $n"
+	done
+	echo "https://github.com/$GH_REPO/releases/tag/$TAG"
+	exit 0
+fi
 REPO=${1:-/mnt/c/Users/psivstar/Documents/proj/WhiteRecomp}
-for f in build/WhiteRecompLauncher_windows.exe build/WhiteRecompLauncher_linux; do
-	[ -f "$f" ] || { echo "publish: $f is missing (launcher/build.sh all)"; exit 1; }
-done
 mkdir -p "$REPO/launcher_src"
-cp build/WhiteRecompLauncher_windows.exe build/WhiteRecompLauncher_linux "$REPO/"
 for f in README.txt THIRD_PARTY_LICENSES.txt; do sed 's/\r*$/\r/' "launcher/release/$f" > "$REPO/$f"; done
 rsync -a --delete --exclude bundle.bin --exclude shared --exclude README.md launcher/ "$REPO/launcher_src/"
 rsync -a --delete --exclude ols.json shared/ "$REPO/launcher_src/shared/"
@@ -28,15 +55,20 @@ carries -- its `bundle.bin`: the translated game code, the runtime, FFmpeg's lib
 converter -- comes from that project's build:
 
     sh launcher/build.sh all      # build/WhiteRecompLauncher_windows.exe and build/WhiteRecompLauncher_linux
-    sh launcher/publish.sh        # copies them, and these sources, into this repo
+    sh launcher/publish.sh        # copies these sources into this repo
+    sh launcher/publish.sh release vX.Y.Z   # (after committing and pushing) uploads the launchers to a GitHub release
 
 `bundle.bin` is not in this repo (it is made per target by `ff bundle`, and is embedded in the launchers).
+The launchers are on the repo's GitHub Releases, not in the repo.
 MD
 cat > "$REPO/.gitignore" <<'GI'
 # what the launcher makes beside itself (Build)
 /WhiteRecomp.exe
 /WhiteRecomp
 /WhiteRecomp.cfg
+# the launchers: on GitHub Releases (launcher/publish.sh release)
+/WhiteRecompLauncher_windows.exe
+/WhiteRecompLauncher_linux
 # made by build.sh, embedded in the launchers
 bundle.bin
 *.o

@@ -2,6 +2,9 @@
 /WhiteRecomp.exe
 /WhiteRecomp
 /WhiteRecomp.cfg
+# the launchers: on GitHub Releases (launcher/publish.sh release)
+/WhiteRecompLauncher_windows.exe
+/WhiteRecompLauncher_linux
 # made by build.sh, embedded in the launchers
 bundle.bin
 *.o

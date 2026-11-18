@@ -7,6 +7,8 @@ carries -- its `bundle.bin`: the translated game code, the runtime, FFmpeg's lib
 converter -- comes from that project's build:
 
     sh launcher/build.sh all      # build/WhiteRecompLauncher_windows.exe and build/WhiteRecompLauncher_linux
-    sh launcher/publish.sh        # copies them, and these sources, into this repo
+    sh launcher/publish.sh        # copies these sources into this repo
+    sh launcher/publish.sh release vX.Y.Z   # (after committing and pushing) uploads the launchers to a GitHub release
 
 `bundle.bin` is not in this repo (it is made per target by `ff bundle`, and is embedded in the launchers).
+The launchers are on the repo's GitHub Releases, not in the repo.

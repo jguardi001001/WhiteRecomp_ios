@@ -4,6 +4,10 @@ WhiteRecomp
 Builds a port of FINAL FANTASY XIII on this computer from the sources it carries and your own Steam copy of the game.
 It does not contain the game: you need FINAL FANTASY XIII installed from Steam.
 
+Download the launcher from https://github.com/ps4star/WhiteRecomp/releases :
+WhiteRecompLauncher_windows.exe (Windows) or WhiteRecompLauncher_linux (Linux x86-64). Put it in a folder of its own:
+Build makes the game beside it.
+
 What this download contains
   - the launcher program
   - inside it, packed:
