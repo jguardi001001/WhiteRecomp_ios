@@ -420,7 +420,7 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	{
 		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Debug & Profile Tools:")
 		if on, ch := toggle(g, ctrl, settings.tools, active); ch {settings.tools = on; changed = true}
-		label(g, g.small, settings.tools ? "Logs, tracing and the profiler, in a console window" : "Off: no console window, nothing printed", note, DIM)
+		label(g, g.small, settings.tools ? "Logs, tracing, the profiler and a frame time counter (console window)" : "Off: no console window, nothing printed", note, DIM)
 	}
 	// FPS
 	{

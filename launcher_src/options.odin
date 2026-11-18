@@ -4,7 +4,10 @@
 //   Audio                     OFF: -DXRC_NO_AUDIO -- no sound output, no mixing, no movie audio thread, no XAudio2
 //                             (the game's own audio engine is a silent stand-in that only keeps its time)
 //   Debug & Profile Tools     OFF: -DXRC_NO_TOOLS -- the XRC_PROFILE / XRC_TRACE_* / log switches cannot be turned on,
-//                             nothing is printed (src/runtime/xrc_quiet.h) and on Windows there is no console window
+//                             nothing is printed (src/runtime/xrc_quiet.h) and on Windows there is no console window;
+//                             ON: stack dumps and the profiler walk the guest's frame chain for every caller (free);
+//                             a build with -DXRC_DEEP_STACKS (pages and runtime: tools/xrc_build.sh XRC_CFLAGS / XRC_DEFS)
+//                             records each call instead -- exact, but ~35% slower, so not the launcher's
 //   FPS                       -DXRC_FRAME_LIMIT=30|60
 //   Graphics Driver           Vulkan, the default everywhere (the launcher always builds it in: -DXRC_VULKAN);
 //                             D3D9 (Windows only): -DXRC_D3D9_DEFAULT -- the system's Direct3D 9, which is broken
