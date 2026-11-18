@@ -15,6 +15,11 @@
 //   Cutscenes                 Auto-skip: -DXRC_SKIP_MOVIES (every movie skipped; the background conversion goes on)
 //   Cutscene Convert Threads  -DXRC_MOVIE_THREADS=N: the CPUs and encoder threads of the background conversion;
 //                             Convert Movies (movies.odin) runs the converter with as many (--threads N)
+//   Shadow Resolution         the game's own arguments, as the retail launcher passes them: -Shadow=512..8192 (the
+//   Anti-Aliasing             game's default 1024; Off: -Shadow=512 and XRC_NO_SHADOWS=1, nothing drawn into the
+//                             shadow maps) and -MSAA=0|2|4|8|16 (its default 4) -- in WhiteRecomp.cfg (XRC_GAME_ARGS),
+//                             not the build: a change rewrites the .cfg of a built game at once (build_game.odin)
+//   Experimental Optimizations -DXRC_EXPERIMENTAL: less-tested optimizations that may break things (xrc_rt.h)
 // The page sources (the translated code) take only the compiler and the optimization level; the runtime takes all.
 package launcher
 
@@ -47,8 +52,17 @@ runtime_option_flags :: proc() -> []string {
 	if !settings.tools {append(&f, "-DXRC_NO_TOOLS")}
 	if !settings.vulkan && ODIN_OS == .Windows {append(&f, "-DXRC_D3D9_DEFAULT")}
 	if settings.skip_movies {append(&f, "-DXRC_SKIP_MOVIES")}
+	if settings.experimental {append(&f, "-DXRC_EXPERIMENTAL")}
 	append(&f, fmt.tprintf("-DXRC_MOVIE_THREADS=%d", clamp(settings.convert_threads, 1, max_convert_threads())))
 	return f[:]
+}
+
+SHADOW_CHOICES :: [6]int{0, 512, 1024, 2048, 4096, 8192} // (8192: the most the retail launcher offers)
+MSAA_CHOICES :: [5]int{0, 2, 4, 8, 16}
+
+// the game's arguments for the options (XRC_GAME_ARGS)
+game_args :: proc() -> string {
+	return fmt.tprintf("-Shadow=%d -MSAA=%d", settings.shadow_res == 0 ? 512 : settings.shadow_res, settings.msaa)
 }
 
 compiler_is_clang :: proc() -> bool {

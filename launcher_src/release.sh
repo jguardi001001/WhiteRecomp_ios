@@ -9,7 +9,7 @@
 #                  (the launcher draws with Vulkan); signed with the hardened runtime, notarized and stapled
 #                  -> dist/ff13-launcher-macos.zip
 # Every release holds the launcher (its packed bundle: the translated C sources, the runtime's C sources and the
-# Windows movie converter), README.txt and THIRD_PARTY_LICENSES.txt (launcher/release/).
+# Windows movie converter), README.md and THIRD_PARTY_LICENSES.txt (launcher/release/).
 # Env: ODIN (the compiler). macOS: MOLTENVK (path of libMoltenVK.dylib; default from $VULKAN_SDK), MOLTENVK_LICENSE
 # (its LICENSE file), MACOS_SIGN_ID ("Developer ID Application: ..."; unset: not signed), NOTARY_PROFILE (a
 # `xcrun notarytool store-credentials` profile; unset: not notarized).
@@ -28,8 +28,8 @@ Linux)
 		rm -rf "$D" "$D.zip"
 		mkdir -p "$D"
 		cp build/WhiteRecompLauncher_windows.exe "$D/"
-		cp $REL/README.txt $REL/THIRD_PARTY_LICENSES.txt "$D/"
-		sed -i 's/$/\r/' "$D/README.txt" "$D/THIRD_PARTY_LICENSES.txt"
+		cp $REL/README.md $REL/THIRD_PARTY_LICENSES.txt "$D/"
+		sed -i 's/$/\r/' "$D/THIRD_PARTY_LICENSES.txt"
 		WD=$(wslpath -w "$ROOT/dist")
 		powershell.exe -NoProfile -Command "Compress-Archive -Force -Path '$WD\\ff13-launcher-windows-x64\\*' -DestinationPath '$WD\\ff13-launcher-windows-x64.zip'"
 		ls -la "$D.zip"
@@ -41,7 +41,7 @@ Linux)
 	rm -rf "$D"
 	mkdir -p "$D"
 	"$ODIN" build launcher -collection:shared=shared -o:speed -out:"$D/ff13-launcher"
-	cp $REL/README.txt $REL/THIRD_PARTY_LICENSES.txt "$D/"
+	cp $REL/README.md $REL/THIRD_PARTY_LICENSES.txt "$D/"
 	tar -C dist -czf "$D.tar.gz" ff13-launcher-linux-x64
 	ls -la "$D.tar.gz"
 	;;
@@ -62,7 +62,7 @@ Darwin)
 	rm -f dist/ff13-launcher-arm64 dist/ff13-launcher-amd64
 	cp "$MVK" "$APP/Contents/Frameworks/libMoltenVK.dylib"
 	cp $REL/Info.plist "$APP/Contents/Info.plist"
-	cp $REL/README.txt "$APP/Contents/Resources/"
+	cp $REL/README.md "$APP/Contents/Resources/"
 	{ cat $REL/THIRD_PARTY_LICENSES.txt
 	  printf '\n\n--------------------------------------------------------------------------------------------------------------------\n'
 	  printf '5. MoltenVK (https://github.com/KhronosGroup/MoltenVK)\n'
@@ -84,7 +84,7 @@ Darwin)
 	else
 		echo "NOTARY_PROFILE not set: not notarized"
 	fi
-	cp $REL/README.txt $REL/THIRD_PARTY_LICENSES.txt dist/ 2>/dev/null || true
+	cp $REL/README.md $REL/THIRD_PARTY_LICENSES.txt dist/ 2>/dev/null || true
 	ls -la dist/ff13-launcher-macos.zip
 	;;
 *)

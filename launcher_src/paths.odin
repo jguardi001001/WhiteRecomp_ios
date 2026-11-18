@@ -80,6 +80,9 @@ Settings :: struct {
 	vulkan:          bool, // Graphics Driver: Vulkan, the default (else Direct3D 9, Windows only)
 	skip_movies:     bool, // Cutscenes: Auto-skip
 	convert_threads: int, // Cutscene Convert Threads
+	shadow_res:      int, // Shadow Resolution: the game's -Shadow=N (512 .. 8192; 0: Off -- no shadows, XRC_NO_SHADOWS)
+	msaa:            int, // Anti-Aliasing: the game's -MSAA=N (2 .. 16; 0: Off)
+	experimental:    bool, // Experimental Optimizations: -DXRC_EXPERIMENTAL
 }
 settings := Settings {
 	opt_level       = 1,
@@ -87,6 +90,8 @@ settings := Settings {
 	fps             = 60,
 	vulkan          = true,
 	convert_threads = 1,
+	shadow_res      = 1024,
+	msaa            = 4,
 }
 
 load_settings :: proc() {
@@ -120,6 +125,12 @@ load_settings :: proc() {
 			settings.skip_movies = v == "1"
 		case "convert_threads":
 			if n_ok && n >= 1 {settings.convert_threads = n}
+		case "shadow_res":
+			if n_ok && (n == 0 || (n >= 512 && n <= 8192)) {settings.shadow_res = n}
+		case "experimental":
+			settings.experimental = v == "1"
+		case "msaa":
+			if n_ok && (n == 0 || n == 2 || n == 4 || n == 8 || n == 16) {settings.msaa = n}
 		}
 	}
 }
@@ -136,5 +147,8 @@ save_settings :: proc() {
 	fmt.sbprintf(&b, "vulkan %d\n", settings.vulkan ? 1 : 0)
 	fmt.sbprintf(&b, "skip_movies %d\n", settings.skip_movies ? 1 : 0)
 	fmt.sbprintf(&b, "convert_threads %d\n", settings.convert_threads)
+	fmt.sbprintf(&b, "shadow_res %d\n", settings.shadow_res)
+	fmt.sbprintf(&b, "msaa %d\n", settings.msaa)
+	fmt.sbprintf(&b, "experimental %d\n", settings.experimental ? 1 : 0)
 	_ = os.write_entire_file(data_path("settings.txt"), b.buf[:])
 }

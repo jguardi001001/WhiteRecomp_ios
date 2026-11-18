@@ -247,8 +247,8 @@ game_out_dir :: proc() -> string {
 
 // WhiteRecomp.cfg: the built game's settings, NAME=value lines it puts in its environment at start
 // (src/runtime/xrc_rt.c load_cfg): the player's install (its C:\FINAL FANTASY XIII), its exe, the saves (the launcher's
-// cdrive), the movie converter and the ffmpeg it runs for the movies without their MP4 (host_movie_convert.c)
-@(private = "file")
+// cdrive), the movie converter and the ffmpeg it runs for the movies without their MP4 (host_movie_convert.c), and the
+// game's own arguments (Shadow Resolution, Anti-Aliasing: XRC_GAME_ARGS)
 write_cfg :: proc(gdir: string) -> bool {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "# WhiteRecomp's settings, written by the launcher's Build (the environment overrides them)\n")
@@ -259,5 +259,7 @@ write_cfg :: proc(gdir: string) -> bool {
 		fmt.sbprintf(&b, "XRC_MOVIE_CONVERTER=%s\n", data_path("tools", "bink2mp4.exe"))
 		if ff := dep_get(.FFmpeg); ff.can_encode && ff.path != "" {fmt.sbprintf(&b, "XRC_MOVIE_FFMPEG=%s\n", ff.path)}
 	}
+	fmt.sbprintf(&b, "XRC_GAME_ARGS=%s\n", game_args())
+	if settings.shadow_res == 0 {fmt.sbprintf(&b, "XRC_NO_SHADOWS=1\n")}
 	return os.write_entire_file(pjoin({gdir, GAME_NAME + ".cfg"}, context.temp_allocator), b.buf[:]) == nil
 }

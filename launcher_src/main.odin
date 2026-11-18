@@ -363,10 +363,10 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	running := sync.atomic_load(&task.running)
 	active := !running
 	head, rest := ui.cut_top(r, px(g, 24))
-	label(g, g.font, running ? "The options can be changed once the current task has finished." : "These apply the next time you press Build.", head, DIM)
+	label(g, g.font, running ? "The options can be changed once the current task has finished." : "Most apply at the next Build; Shadow Resolution and Anti-Aliasing the next time the game starts.", head, DIM)
 	_, rest = ui.cut_top(rest, px(g, 8))
-	nrows := 8
-	row_h := px(g, 50)
+	nrows := 11
+	row_h := clamp((rest.h - px(g, 24)) / nrows, px(g, 40), px(g, 50))
 	oc, _ := ui.cut_top(rest, nrows * row_h + px(g, 16))
 	card(g, oc)
 	oi := ui.inset_xy(oc, px(g, 20), px(g, 8))
@@ -461,7 +461,40 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 		if n, ch := dropdown(g, "threads", ctrl, names, sel, active = active); ch {settings.convert_threads = n + 1; changed = true}
 		label(g, g.small, "CPU threads for converting (Convert Movies and in the background)", note, DIM)
 	}
+	// Shadow Resolution, Anti-Aliasing: the game's arguments (in its .cfg: no Build needed)
+	game_changed := false
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Shadow Resolution:")
+		res := SHADOW_CHOICES
+		names := make([]string, len(res), context.temp_allocator)
+		sel := 2
+		for v, i in res {
+			names[i] = v == 0 ? "Off (no shadows)" : v == 1024 ? "1024 x 1024 (DEFAULT)" : fmt.tprintf("%d x %d", v, v)
+			if v == settings.shadow_res {sel = i}
+		}
+		if n, ch := dropdown(g, "shadow", ctrl, names, sel, active = active); ch {settings.shadow_res = res[n]; changed = true; game_changed = true}
+		label(g, g.small, "Sharper shadows cost GPU time; Off is the fastest. No Build needed", note, DIM)
+	}
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Anti-Aliasing (MSAA):")
+		ms := MSAA_CHOICES
+		names := []string{"Off", "2x", "4x (DEFAULT)", "8x", "16x"}
+		sel := 2
+		for v, i in ms {if v == settings.msaa {sel = i}}
+		if n, ch := dropdown(g, "msaa", ctrl, names, sel, active = active); ch {settings.msaa = ms[n]; changed = true; game_changed = true}
+		label(g, g.small, "Smoother edges cost GPU time (up to what the GPU has); no Build needed", note, DIM)
+	}
+	// Experimental Optimizations
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Experimental Optimizations:")
+		if on, ch := toggle(g, ctrl, settings.experimental, active); ch {settings.experimental = on; changed = true}
+		label(g, g.small, settings.experimental ? "On: less-tested speed-ups that may break things" : "Off: only the tested ones", note, settings.experimental ? WARN : DIM)
+	}
 	if changed {save_settings()}
+	if game_changed {
+		gdir := game_out_dir()
+		if file_exists(pjoin({gdir, GAME_NAME + ".cfg"}, context.temp_allocator)) {_ = write_cfg(gdir)}
+	}
 }
 
 // ---------------------------------------------------------------------------------------------- dialogs

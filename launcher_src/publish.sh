@@ -3,7 +3,8 @@
 # launcher/publish.sh release TAG [REPO]   (WSL; after launcher/build.sh all) a GitHub release of the launchers
 #                                          (REPLACE=1: every earlier release and its tag deleted first)
 # The repo (default C:\Users\psivstar\Documents\proj\WhiteRecomp; on GitHub ps4star/WhiteRecomp) holds:
-#   README.txt, THIRD_PARTY_LICENSES.txt   launcher/release/ (CRLF)
+#   README.md                              launcher/release/README.md (GitHub's page)
+#   THIRD_PARTY_LICENSES.txt               launcher/release/ (CRLF)
 #   launcher_src/                          the launcher's sources: launcher/ (without its bundle.bin) and shared/ (the
 #                                          iv_* libraries) as launcher_src/shared/
 # The launchers themselves are not in the repo but on its GitHub Releases: `release TAG` makes release TAG at the
@@ -40,7 +41,7 @@ if [ "${1:-}" = release ]; then
 	OUT=$(mktemp)
 	CODE=$(curl -s -o "$OUT" -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
 		"https://api.github.com/repos/$GH_REPO/releases" \
-		-d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"$SHA\",\"name\":\"WhiteRecomp $TAG\",\"body\":\"Download the launcher for your system: WhiteRecompLauncher_windows.exe (Windows) or WhiteRecompLauncher_linux (Linux x86-64; chmod +x it). Put it in a folder of its own: Build makes the game beside it. See README.txt.\"}")
+		-d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"$SHA\",\"name\":\"WhiteRecomp $TAG\",\"body\":\"Download the launcher for your system: WhiteRecompLauncher_windows.exe (Windows) or WhiteRecompLauncher_linux (Linux x86-64; chmod +x it). Put it in a folder of its own: Build makes the game beside it. See README.md.\"}")
 	[ "$CODE" = 201 ] || { echo "publish: creating release $TAG failed ($CODE):"; cat "$OUT"; rm -f "$OUT"; exit 1; }
 	ID=$(sed -n 's/^  "id": \([0-9]*\),$/\1/p' "$OUT" | head -1)
 	rm -f "$OUT"
@@ -56,7 +57,9 @@ if [ "${1:-}" = release ]; then
 fi
 REPO=${1:-/mnt/c/Users/psivstar/Documents/proj/WhiteRecomp}
 mkdir -p "$REPO/launcher_src"
-for f in README.txt THIRD_PARTY_LICENSES.txt; do sed 's/\r*$/\r/' "launcher/release/$f" > "$REPO/$f"; done
+cp launcher/release/README.md "$REPO/README.md"
+rm -f "$REPO/README.txt" # (the plain-text one before README.md)
+sed 's/\r*$/\r/' launcher/release/THIRD_PARTY_LICENSES.txt > "$REPO/THIRD_PARTY_LICENSES.txt"
 rsync -a --delete --exclude bundle.bin --exclude shared --exclude README.md launcher/ "$REPO/launcher_src/"
 rsync -a --delete --exclude ols.json shared/ "$REPO/launcher_src/shared/"
 cat > "$REPO/launcher_src/README.md" <<'MD'
