@@ -3,24 +3,31 @@
 // (runtime/), its header (include/xrc.h) and the movie converter (tools/bink2mp4.exe; Windows: with the ffmpeg.exe it
 // encodes with, tools/ffmpeg.exe, GPL: third_party/ffmpeg_exe). Nothing of the game itself:
 // its data comes from the player's own ffxiiiimg.exe and install.
+//
+// The files are in solid LZMA blocks (a block: files of one folder, up to 32 MB), unpacked by lzma/ (our decoder):
+// reading a file unpacks its whole block, so the blocks are unpacked once each, on every core (bundle_extract).
 package launcher
 
-import "core:compress/deflate"
 import "core:os"
 import "core:path/filepath"
+import "core:slice"
 import "core:strings"
 import "core:sync"
 import "core:thread"
+import "lzma"
 
 BUNDLE: []u8 = #load("bundle.bin")
 
 Bundle_Entry :: struct {
 	path:         string,
-	flags:        u32,
-	size, packed: u64,
-	offset:       u64,
+	flags, block: u32,
+	offset, size: u64,
+}
+Bundle_Block :: struct {
+	size, packed, offset: u64,
 }
 bundle_entries: [dynamic]Bundle_Entry
+bundle_blocks: [dynamic]Bundle_Block
 
 @(private = "file")
 le :: proc(b: []u8, o: int, n: int) -> u64 {
@@ -31,18 +38,26 @@ le :: proc(b: []u8, o: int, n: int) -> u64 {
 
 bundle_open :: proc() -> bool {
 	b := BUNDLE
-	if len(b) < 12 || string(b[:8]) != "FFBUNDL1" {return false}
-	n := int(le(b, 8, 4))
-	o := 12
-	for _ in 0 ..< n {
+	if len(b) < 16 || string(b[:8]) != "FFBUNDL2" {return false}
+	nb := int(le(b, 8, 4))
+	nf := int(le(b, 12, 4))
+	o := 16
+	for _ in 0 ..< nb {
+		k := Bundle_Block{size = le(b, o, 8), packed = le(b, o + 8, 8), offset = le(b, o + 16, 8)}
+		if k.offset + k.packed > u64(len(b)) {return false}
+		append(&bundle_blocks, k)
+		o += 24
+	}
+	for _ in 0 ..< nf {
 		pl := int(le(b, o, 2))
 		e := Bundle_Entry{path = string(b[o + 2:o + 2 + pl])}
 		o += 2 + pl
 		e.flags = u32(le(b, o, 4))
-		e.size = le(b, o + 4, 8)
-		e.packed = le(b, o + 12, 8)
-		e.offset = le(b, o + 20, 8)
-		o += 28
+		e.block = u32(le(b, o + 4, 4))
+		e.offset = le(b, o + 8, 8)
+		e.size = le(b, o + 16, 8)
+		o += 24
+		if int(e.block) >= nb || e.offset + e.size > bundle_blocks[e.block].size {return false}
 		append(&bundle_entries, e)
 	}
 	return true
@@ -53,26 +68,38 @@ bundle_has :: proc(path: string) -> bool {
 	return false
 }
 
+// One block, unpacked (in the allocator).
+@(private = "file")
+block_read :: proc(bi: u32, allocator := context.allocator) -> (data: []u8, ok: bool) {
+	k := bundle_blocks[bi]
+	data = make([]u8, int(k.size), allocator)
+	if !lzma.decode(BUNDLE[k.offset:k.offset + k.packed], data) {
+		delete(data, allocator)
+		return nil, false
+	}
+	return data, true
+}
+
 // One file of the bundle, unpacked (in the allocator).
 bundle_read :: proc(path: string, allocator := context.allocator) -> (data: []u8, ok: bool) {
 	for e in bundle_entries {
 		if e.path != path {continue}
-		out := make([dynamic]u8, 0, int(e.size), allocator)
-		src := BUNDLE[e.offset:e.offset + e.packed]
-		if deflate.inflate_raw(&out, src, int(e.size), allocator = allocator) != nil || u64(len(out)) != e.size {return nil, false}
-		return out[:], true
+		blk := block_read(e.block, context.allocator) or_return
+		defer delete(blk)
+		return slice.clone(blk[e.offset:e.offset + e.size], allocator), true
 	}
 	return nil, false
 }
 
-// Unpacks every file whose path starts with one of prefixes into dir (keeping its path), on every core. A file that
+// Unpacks every file whose path starts with one of prefixes into dir (keeping its path), a block per core. A file that
 // is already there with the same contents is left alone (its time stays, so an incremental build keeps its object).
 // Returns the number written, or -1 on an error.
 bundle_extract :: proc(t: ^Task, dir: string, prefixes: []string) -> int {
 	Job :: struct {
 		t:        ^Task,
 		dir:      string,
-		list:     []Bundle_Entry,
+		sel:      []Bundle_Entry,
+		blocks:   []u32,
 		next:     int,
 		done:     int,
 		written:  int,
@@ -81,45 +108,62 @@ bundle_extract :: proc(t: ^Task, dir: string, prefixes: []string) -> int {
 		err_path: string,
 	}
 	sel := make([dynamic]Bundle_Entry, context.temp_allocator)
+	blocks := make([dynamic]u32, context.temp_allocator)
 	for e in bundle_entries {
-		for p in prefixes {if strings.has_prefix(e.path, p) {append(&sel, e); break}}
+		for p in prefixes {
+			if strings.has_prefix(e.path, p) {
+				append(&sel, e)
+				if !slice.contains(blocks[:], e.block) {append(&blocks, e.block)}
+				break
+			}
+		}
 	}
-	job := Job{t = t, dir = dir, list = sel[:]}
+	// (the biggest blocks first: the last one to finish is a small one)
+	slice.sort_by(blocks[:], proc(a, b: u32) -> bool {return bundle_blocks[a].size > bundle_blocks[b].size})
+	job := Job{t = t, dir = dir, sel = sel[:], blocks = blocks[:]}
 	worker :: proc(th: ^thread.Thread) {
 		j := (^Job)(th.data)
 		for !cancelled(j.t) {
 			k := sync.atomic_add(&j.next, 1)
-			if k >= len(j.list) {return}
-			e := j.list[k]
-			data, ok := bundle_read(e.path)
-			dst := pjoin({j.dir, e.path})
-			if ok {
-				old, rerr := os.read_entire_file(dst, context.allocator)
-				same := rerr == nil && len(old) == len(data) && string(old) == string(data)
-				delete(old)
-				if !same {
-					_ = os.make_directory_all(filepath.dir(dst))
-					ok = os.write_entire_file(dst, data) == nil
-					when ODIN_OS != .Windows {
-						if ok && e.flags & 1 != 0 {_ = os.chmod(dst, {.Read_User, .Write_User, .Execute_User, .Read_Group, .Execute_Group, .Read_Other, .Execute_Other})}
+			if k >= len(j.blocks) {return}
+			bi := j.blocks[k]
+			blk, ok := block_read(bi)
+			for e in j.sel {
+				if e.block != bi {continue}
+				if ok {
+					data := blk[e.offset:e.offset + e.size]
+					dst := pjoin({j.dir, e.path})
+					old, rerr := os.read_entire_file(dst, context.allocator)
+					same := rerr == nil && len(old) == len(data) && string(old) == string(data)
+					delete(old)
+					if !same {
+						_ = os.make_directory_all(filepath.dir(dst))
+						if os.write_entire_file(dst, data) != nil {
+							ok = false
+						} else {
+							when ODIN_OS != .Windows {
+								if e.flags & 1 != 0 {_ = os.chmod(dst, {.Read_User, .Write_User, .Execute_User, .Read_Group, .Execute_Group, .Read_Other, .Execute_Other})}
+							}
+							sync.atomic_add(&j.written, 1)
+						}
 					}
-					if ok {sync.atomic_add(&j.written, 1)}
 				}
-				delete(data)
+				if !ok {
+					sync.mutex_lock(&j.mutex)
+					j.failed = true
+					j.err_path = e.path
+					sync.mutex_unlock(&j.mutex)
+					break
+				}
+				d := sync.atomic_add(&j.done, 1) + 1
+				set_status(j.t, f32(d) / f32(len(j.sel)) * 0.1, "Unpacking the sources: %d of %d", d, len(j.sel))
+				free_all(context.temp_allocator)
 			}
-			if !ok {
-				sync.mutex_lock(&j.mutex)
-				j.failed = true
-				j.err_path = e.path
-				sync.mutex_unlock(&j.mutex)
-			}
-			d := sync.atomic_add(&j.done, 1) + 1
-			set_status(j.t, f32(d) / f32(len(j.list)) * 0.1, "Unpacking the sources: %d of %d", d, len(j.list))
-			free_all(context.temp_allocator)
+			delete(blk)
 		}
 	}
 	threads := make([dynamic]^thread.Thread, context.temp_allocator)
-	for _ in 0 ..< max(1, os.get_processor_core_count()) {
+	for _ in 0 ..< max(1, min(len(blocks), os.get_processor_core_count())) {
 		th := thread.create(worker)
 		th.data = &job
 		th.init_context = context

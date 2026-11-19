@@ -329,6 +329,8 @@ cfg_game_lines :: proc(b: ^strings.Builder) {
 	fmt.sbprintf(b, "XRC_GAME_ARGS=%s\n", game_args())
 	if settings.shadow_res == 0 {fmt.sbprintf(b, "XRC_NO_SHADOWS=1\n")}
 	if settings.memory_2gb {fmt.sbprintf(b, "XRC_GUEST_2GB=1\n")}
+	if settings.stretch {fmt.sbprintf(b, "XRC_STRETCH=1\n")}
+	if settings.fx_full {fmt.sbprintf(b, "XRC_VK_HALF_FX=0\n")}
 	if settings.aa_fxaa && settings.aa_quality > 1 {fmt.sbprintf(b, "XRC_FXAA=%d\n", settings.aa_quality)}
 	if settings.convert_threads == 0 {fmt.sbprintf(b, "XRC_MOVIE_NO_CONVERT=1\n")}
 	fmt.sbprintf(b, "XRC_VK_PIPE_THREADS=%d\n", pipe_threads())

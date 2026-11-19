@@ -387,6 +387,13 @@ draw_task :: proc(g: ^Gui, r: ui.Rect, running: bool) {
 // ---------------------------------------------------------------------------------------------- Options
 CUTSCENE_TIP :: "FINAL FANTASY XIII's cutscenes are Bink 2 videos, which this port cannot play directly: each one is converted to an MP4 once (Convert Movies on the Home tab does them all; while you play, the game also converts the missing ones in the background, quietly, one at a time). A cutscene that has no MP4 yet is skipped.\n\nPlay if converted: a cutscene plays once its MP4 exists, and is skipped until then.\nAuto-skip: every cutscene is skipped, even the converted ones (for replays and speedruns). The background conversion goes on, so they are ready if you switch back (with a new Build)."
 
+// the options' scroll position (pixels from the top) and its scroll bar's drag
+opt_scroll: int
+opt_content_h: int
+opt_after_head: bool // (no line over the row right under a heading)
+opt_drag: bool
+opt_grab: int
+
 draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	running := sync.atomic_load(&task.running)
 	active := !running
@@ -394,62 +401,85 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	label(g, g.font, running ? "The options can be changed once the current task has finished." : "Most apply at the next Build; Graphics and Memory the next time the game starts.", head, DIM)
 	_, rest = ui.cut_top(rest, px(g, 8))
 	custom := settings.graphics == GRAPHICS_CUSTOM
-	nrows := custom ? 18 : 15 // (the Custom graphics rows only under Custom)
-	row_h := clamp((rest.h - px(g, 24)) / 18, px(g, 30), px(g, 50)) // (the same height either way)
-	oc, _ := ui.cut_top(rest, nrows * row_h + px(g, 16))
-	card(g, oc)
-	oi := ui.inset_xy(oc, px(g, 20), px(g, 8))
+	// one option a row: its name, its control, its note beside them (two lines at most), the options under a heading
+	// for each category. The card fills the tab; what does not fit scrolls (the wheel over it, or its scroll bar)
+	row_h := px(g, 50)
+	card(g, rest)
+	view := ui.inset_xy(rest, px(g, 20), px(g, 8))
+	content_h := opt_content_h // (last frame's: known once the rows are laid out)
+	max_scroll := max(0, content_h - view.h)
+	sb_w := px(g, 8)
+	track := ui.Rect{view.x + view.w - sb_w + px(g, 12), view.y, sb_w, view.h}
+	oi := view
+	if max_scroll > 0 {oi.w -= px(g, 12)}
+	if max_scroll > 0 && live(g) {
+		min_th := px(g, 28)
+		th := ui.thumb(track, content_h, view.h, opt_scroll, true, min_th)
+		if inside(rest, g.mouse) {opt_scroll -= frame_wheel * px(g, 16)}
+		if g.clicked && inside(ui.outset(track, px(g, 4)), g.mouse) {
+			if inside(th, g.mouse) {opt_drag = true; opt_grab = g.mouse.y - th.y} else {opt_scroll += g.mouse.y < th.y ? -view.h : view.h}
+			g.clicked = false
+		}
+		if opt_drag {
+			if g.down {opt_scroll = ui.thumb_offset(track, content_h, view.h, g.mouse.y, opt_grab, true, min_th)} else {opt_drag = false}
+		}
+	}
+	opt_scroll = clamp(opt_scroll, 0, max_scroll)
+	if max_scroll > 0 {
+		th := ui.thumb(track, content_h, view.h, opt_scroll, true, px(g, 28))
+		fill_round(g, track, sb_w / 2, ren.Color{0, 0, 0, 12})
+		fill_round(g, th, sb_w / 2, opt_drag || inside(ui.outset(track, px(g, 4)), g.mouse) ? ren.Color{0, 0, 0, 110} : ren.Color{0, 0, 0, 70})
+	}
+	// (the cells scrolled out of the view are clipped; the mouse outside the view reaches none of them)
+	saved_mouse := g.mouse
+	if !inside(view, g.mouse) {g.mouse = {-1 << 20, -1 << 20}}
+	defer g.mouse = saved_mouse
+	ren.push_clip(g.dl, {view.x - px(g, 6), view.y, oi.w + px(g, 12), view.h})
+	defer ren.pop_clip(g.dl)
+	oi.y -= opt_scroll
 	label_w := px(g, 230)
 	ctrl_w := px(g, 270)
 	changed := false
-	row := 0
+	game_changed := false // (an option of the game's .cfg: rewritten at once, no Build needed)
+	row := 0 // (the next row's top, from the content's)
+	// a category's heading
+	section :: proc(g: ^Gui, oi: ui.Rect, row: ^int, name: string) {
+		top := row^ > 0 ? px(g, 18) : px(g, 4)
+		y := oi.y + row^ + top
+		label(g, g.bold, name, {oi.x, y, oi.w, px(g, 26)}, ACCENT)
+		ren.draw_rect(g.dl, {oi.x, y + px(g, 30), oi.w, 2}, CARD_BORDER)
+		row^ += top + px(g, 34)
+		opt_after_head = true
+	}
 	next_row :: proc(g: ^Gui, oi: ui.Rect, row: ^int, row_h, label_w, ctrl_w: int, name: string, indent := 0) -> (whole, ctrl, note: ui.Rect) {
-		y := oi.y + row^ * row_h
+		y := oi.y + row^
 		whole = {oi.x, y, oi.w, row_h}
-		if row^ > 0 {ren.draw_rect(g.dl, {oi.x + indent, y, oi.w - indent, 1}, CARD_BORDER)}
+		if !opt_after_head {ren.draw_rect(g.dl, {oi.x + indent, y, oi.w - indent, 1}, CARD_BORDER)}
+		opt_after_head = false
 		label(g, g.font, name, {oi.x + indent, y, label_w - indent, row_h}, indent > 0 ? DIM : TEXT)
 		ctrl = {oi.x + label_w, y + (row_h - px(g, 32)) / 2, ctrl_w, px(g, 32)}
 		note = {ctrl.x + ctrl_w + px(g, 16), y, oi.w - label_w - ctrl_w - px(g, 16), row_h}
-		row^ += 1
+		row^ += row_h
 		return
 	}
 
-	// Compiler
+	// ---- Display
+	section(g, oi, &row, "Display")
+	// Resolution: the game's -Width= / -Height= (in its .cfg: no Build needed)
 	{
-		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Compiler:")
-		cs := compilers_get()
-		if len(cs) == 0 {
-			label(g, g.font, deps_checked ? "No C compiler found" : "Looking for compilers…", ctrl, deps_checked ? BAD : DIM)
-			if deps_checked && button(g, {note.x, ctrl.y, px(g, 150), ctrl.h}, "Where to get one", active) {no_compiler_dialog = 1}
-		} else {
-			names := make([]string, len(cs), context.temp_allocator)
-			sel := 0
-			for c, i in cs {
-				names[i] = c.label
-				if c.path == settings.compiler {sel = i}
-			}
-			if n, ch := dropdown(g, "compiler", ctrl, names, sel, active = active); ch {select_compiler(cs[n].path); changed = true}
-			label(g, g.small, cs[sel].path, note, DIM)
-		}
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Resolution:")
+		res := RESOLUTIONS
+		names := make([]string, len(res), context.temp_allocator)
+		for r, i in res {names[i] = i == RES_DEFAULT ? fmt.tprintf("%d x %d (Default)", r.w, r.h) : fmt.tprintf("%d x %d", r.w, r.h)}
+		sel := clamp(settings.resolution, 0, len(res) - 1)
+		if n, ch := dropdown(g, "resolution", ctrl, names, sel, active = active); ch {settings.resolution = n; changed = true; game_changed = true}
+		note_text(g, sel == RES_DEFAULT ? "What the game renders at; the window can be resized; no Build needed" : sel < RES_DEFAULT ? "Lower is faster on the GPU, less sharp; the window can be resized; no Build needed" : "Higher costs GPU time; the window can be resized; no Build needed", note, DIM)
 	}
-	// Optimization Level
+	// Window Scaling: the picture in a window of another shape than 16:9 (XRC_STRETCH in its .cfg: no Build needed)
 	{
-		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Optimization Level:")
-		levels := OPT_LEVELS
-		if n, ch := dropdown(g, "opt", ctrl, levels[:], settings.opt_level, active = active); ch {settings.opt_level = n; changed = true}
-		label(g, g.small, "Higher: a slower build, a faster game", note, DIM)
-	}
-	// Audio
-	{
-		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Audio:")
-		if on, ch := toggle(g, ctrl, settings.audio, active); ch {settings.audio = on; changed = true}
-		label(g, g.small, settings.audio ? "Music, sound and voices" : "No audio work at all (play your own music)", note, DIM)
-	}
-	// Debug & Profile Tools
-	{
-		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Debug & Profile Tools:")
-		if on, ch := toggle(g, ctrl, settings.tools, active); ch {settings.tools = on; changed = true}
-		label(g, g.small, settings.tools ? "Logs, tracing, the profiler and an FPS counter (console window)" : "Off: no console window, nothing printed", note, DIM)
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Window Scaling:")
+		if n, ch := dropdown(g, "scaling", ctrl, {"Fit (Default)", "Stretch"}, settings.stretch ? 1 : 0, active = active); ch {settings.stretch = n == 1; changed = true; game_changed = true}
+		note_text(g, settings.stretch ? "Fills the window; the picture is squeezed if it isn't 16:9" : "Keeps the 16:9 shape: black bars in a window of another shape", note, DIM)
 	}
 	// FPS
 	{
@@ -466,52 +496,14 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 			names := []string{"Vulkan (Recommended)", "D3D9"}
 			sel := settings.vulkan ? 0 : 1
 			if n, ch := dropdown(g, "gfx", ctrl, names, sel, active = active); ch {settings.vulkan = n == 0; changed = true}
-			label(g, g.small, sel == 0 ? "The port's Vulkan renderer" : "Windows' Direct3D 9: broken for now (stops after the first fight)", note, sel == 0 ? DIM : WARN)
+			note_text(g, sel == 0 ? "The port's Vulkan renderer" : "Windows' Direct3D 9: broken for now (stops after the first fight)", note, sel == 0 ? DIM : WARN)
 		} else {
 			_, _ = dropdown(g, "gfx", ctrl, {"Vulkan"}, 0, active = active) // (the only one there)
-			label(g, g.small, "The port's Vulkan renderer", note, DIM)
+			note_text(g, "The port's Vulkan renderer", note, DIM)
 		}
 	}
-	game_changed := false // (an option of the game's .cfg: rewritten at once, no Build needed)
-	// Cutscenes (with its tooltip over the whole row)
-	{
-		whole, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Cutscenes:")
-		names := []string{"Play if converted", "Auto-skip"}
-		if n, ch := dropdown(g, "cutscenes", ctrl, names, settings.skip_movies ? 1 : 0, active = active); ch {settings.skip_movies = n == 1; changed = true}
-		label(g, g.small, "Hover for how cutscenes work", note, DIM)
-		tooltip_zone(g, "cutscenes", whole, CUTSCENE_TIP)
-	}
-	// Cutscene Convert Threads
-	{
-		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Cutscene Convert Threads:")
-		n_max := max_convert_threads()
-		names := make([]string, n_max + 1, context.temp_allocator)
-		names[0] = "Off"
-		for i in 1 ..= n_max {names[i] = i == 1 ? "1 (DEFAULT)" : fmt.tprintf("%d", i)}
-		sel := settings.convert_threads == 0 ? 0 : clamp(settings.convert_threads, 1, n_max)
-		if n, ch := dropdown(g, "threads", ctrl, names, sel, active = active); ch {settings.convert_threads = n; changed = true; game_changed = true}
-		label(g, g.small, sel == 0 ? "No converting while you play (Convert Movies uses 1)" : "CPU threads for converting (Convert Movies and in the background)", note, DIM)
-	}
-	// Pipeline Build Threads (in its .cfg: no Build needed)
-	{
-		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Pipeline Build Threads:")
-		n_max, best := max_pipe_threads(), best_pipe_threads()
-		names := make([]string, n_max, context.temp_allocator)
-		for i in 0 ..< n_max {names[i] = i + 1 == best ? fmt.tprintf("%d (Best)", i + 1) : fmt.tprintf("%d", i + 1)}
-		sel := pipe_threads() - 1
-		if n, ch := dropdown(g, "pipes", ctrl, names, sel, active = active); ch {settings.pipe_threads = n + 1 == best ? 0 : n + 1; changed = true; game_changed = true}
-		label(g, g.small, "Threads preparing new graphics effects in the background; no Build needed", note, DIM)
-	}
-	// Resolution: the game's -Width= / -Height= (in its .cfg: no Build needed)
-	{
-		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Resolution:")
-		res := RESOLUTIONS
-		names := make([]string, len(res), context.temp_allocator)
-		for r, i in res {names[i] = i == RES_DEFAULT ? fmt.tprintf("%d x %d (DEFAULT)", r.w, r.h) : fmt.tprintf("%d x %d", r.w, r.h)}
-		sel := clamp(settings.resolution, 0, len(res) - 1)
-		if n, ch := dropdown(g, "resolution", ctrl, names, sel, active = active); ch {settings.resolution = n; changed = true; game_changed = true}
-		label(g, g.small, sel == RES_DEFAULT ? "What the game renders at; the window can be resized; no Build needed" : sel < RES_DEFAULT ? "Lower is faster on the GPU, less sharp; the window can be resized; no Build needed" : "Higher costs GPU time; the window can be resized; no Build needed", note, DIM)
-	}
+	// ---- Graphics
+	section(g, oi, &row, "Graphics")
 	// Graphics: a preset of Shadow Resolution and Anti-aliasing, or Custom -- those, indented below it. The game's
 	// arguments (in its .cfg: no Build needed)
 	{
@@ -523,7 +515,7 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 			changed = true; game_changed = true
 		}
 		notes := [5]string{"No shadows, no anti-aliasing: the fastest", "Low-resolution shadows, 2x FXAA", "The game's shadows, 4x FXAA", "The sharpest shadows, 8x FXAA: costly on the GPU", "Shadows and anti-aliasing as set below"}
-		label(g, g.small, fmt.tprintf("%s; no Build needed", notes[clamp(settings.graphics, 0, GRAPHICS_CUSTOM)]), note, DIM)
+		note_text(g, fmt.tprintf("%s; no Build needed", notes[clamp(settings.graphics, 0, GRAPHICS_CUSTOM)]), note, DIM)
 	}
 	IND := px(g, 24)
 	if custom {
@@ -532,33 +524,115 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 		names := make([]string, len(res), context.temp_allocator)
 		sel := 2
 		for v, i in res {
-			names[i] = v == 0 ? "Off (no shadows)" : v == 1024 ? "1024 x 1024 (DEFAULT)" : fmt.tprintf("%d x %d", v, v)
+			names[i] = v == 0 ? "Off (No Shadows)" : v == 1024 ? "1024 x 1024 (Default)" : fmt.tprintf("%d x %d", v, v)
 			if v == settings.shadow_res {sel = i}
 		}
 		if n, ch := dropdown(g, "shadow", ctrl, names, sel, active = active); ch {settings.shadow_res = res[n]; changed = true; game_changed = true}
-		label(g, g.small, "Sharper shadows cost GPU time; Off is the fastest", note, DIM)
+		note_text(g, "Sharper shadows cost GPU time; Off is the fastest", note, DIM)
 	}
 	if custom {
 		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Anti-alias Method:", IND)
-		names := []string{"MSAA", "FXAA (DEFAULT)"}
+		names := []string{"MSAA", "FXAA (Default)"}
 		if n, ch := dropdown(g, "aa_method", ctrl, names, settings.aa_fxaa ? 1 : 0, active = active); ch {settings.aa_fxaa = n == 1; changed = true; game_changed = true}
-		label(g, g.small, settings.aa_fxaa ? "A cheap filter on the 3D image (not the HUD)" : "Multisampling: costly on integrated GPUs", note, DIM)
+		note_text(g, settings.aa_fxaa ? "A cheap filter on the 3D image (not the HUD)" : "Multisampling: costly on integrated GPUs", note, DIM)
 	}
 	if custom {
 		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Anti-alias Quality:", IND)
 		qs := AA_QUALITIES
-		names := []string{"1x (off)", "2x", "4x (DEFAULT)", "8x"}
+		names := []string{"1x (Off)", "2x", "4x (Default)", "8x"}
 		sel := 2
 		for v, i in qs {if v == settings.aa_quality {sel = i}}
 		if n, ch := dropdown(g, "aa_quality", ctrl, names, sel, active = active); ch {settings.aa_quality = qs[n]; changed = true; game_changed = true}
-		label(g, g.small, settings.aa_fxaa ? "FXAA strength: higher smooths longer edges" : "Samples per pixel (up to what the GPU has)", note, DIM)
+		note_text(g, settings.aa_fxaa ? "FXAA strength: higher smooths longer edges" : "Samples per pixel (up to what the GPU has)", note, DIM)
+	}
+	// Effects Resolution: the blended effects (fire, sparks, magic) drawn at half resolution (XRC_VK_HALF_FX in its .cfg:
+	// no Build needed; Vulkan only)
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Effects Resolution:")
+		if n, ch := dropdown(g, "fx_res", ctrl, {"Half (Default)", "Full"}, settings.fx_full ? 1 : 0, active = active); ch {settings.fx_full = n == 1; changed = true; game_changed = true}
+		note_text(g, settings.fx_full ? "Effects as sharp as the rest; costly in battle on integrated GPUs" : "Battle effects cost a quarter of the GPU time, a little softer; no Build needed", note, DIM)
+	}
+	// ---- Audio & Controls
+	section(g, oi, &row, "Audio & Controls")
+	// Audio
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Audio:")
+		if on, ch := toggle(g, ctrl, settings.audio, active); ch {settings.audio = on; changed = true}
+		note_text(g, settings.audio ? "Music, sound and voices" : "No audio work at all (play your own music)", note, DIM)
+	}
+	// Gamepad Scanning
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Gamepad Scanning:")
+		names := []string{"Every 2 seconds (Default)", "Once"}
+		if n, ch := dropdown(g, "pad_scan", ctrl, names, settings.pad_once ? 1 : 0, active = active); ch {settings.pad_once = n == 1; changed = true}
+		note_text(g, settings.pad_once ? "Only the controllers there at the start (plug one in: restart the game)" : "A controller plugged in while playing is found within 2 seconds", note, DIM)
+	}
+	// ---- Cutscenes
+	section(g, oi, &row, "Cutscenes")
+	// Cutscenes (with its tooltip over the whole row)
+	{
+		whole, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Cutscenes:")
+		names := []string{"Play if converted", "Auto-skip"}
+		if n, ch := dropdown(g, "cutscenes", ctrl, names, settings.skip_movies ? 1 : 0, active = active); ch {settings.skip_movies = n == 1; changed = true}
+		note_text(g, "Hover for how cutscenes work", note, DIM)
+		tooltip_zone(g, "cutscenes", whole, CUTSCENE_TIP)
+	}
+	// Cutscene Convert Threads
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Cutscene Convert Threads:")
+		n_max := max_convert_threads()
+		names := make([]string, n_max + 1, context.temp_allocator)
+		names[0] = "Off"
+		for i in 1 ..= n_max {names[i] = i == 1 ? "1 (Default)" : fmt.tprintf("%d", i)}
+		sel := settings.convert_threads == 0 ? 0 : clamp(settings.convert_threads, 1, n_max)
+		if n, ch := dropdown(g, "threads", ctrl, names, sel, active = active); ch {settings.convert_threads = n; changed = true; game_changed = true}
+		note_text(g, sel == 0 ? "No converting while you play (Convert Movies uses 1)" : "CPU threads for converting (Convert Movies and in the background)", note, DIM)
+	}
+	// ---- Performance
+	section(g, oi, &row, "Performance")
+	// Pipeline Build Threads (in its .cfg: no Build needed)
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Pipeline Build Threads:")
+		n_max, best := max_pipe_threads(), best_pipe_threads()
+		names := make([]string, n_max, context.temp_allocator)
+		for i in 0 ..< n_max {names[i] = i + 1 == best ? fmt.tprintf("%d (Best)", i + 1) : fmt.tprintf("%d", i + 1)}
+		sel := pipe_threads() - 1
+		if n, ch := dropdown(g, "pipes", ctrl, names, sel, active = active); ch {settings.pipe_threads = n + 1 == best ? 0 : n + 1; changed = true; game_changed = true}
+		note_text(g, "Threads preparing new graphics effects in the background; no Build needed", note, DIM)
 	}
 	// Memory (in its .cfg: no Build needed)
 	{
 		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Memory:")
 		names := []string{"2GB", "4GB (Recommended)"}
 		if n, ch := dropdown(g, "memory", ctrl, names, settings.memory_2gb ? 0 : 1, active = active); ch {settings.memory_2gb = n == 0; changed = true; game_changed = true}
-		label(g, g.small, settings.memory_2gb ? "The 2 GB the original exe gets; no Build needed" : "The address space a 4 GB-patched exe gets; no Build needed", note, DIM)
+		note_text(g, settings.memory_2gb ? "The 2 GB the original exe gets; no Build needed" : "The address space a 4 GB-patched exe gets; no Build needed", note, DIM)
+	}
+	// ---- Build
+	section(g, oi, &row, "Build")
+	// Compiler
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Compiler:")
+		cs := compilers_get()
+		if len(cs) == 0 {
+			label(g, g.font, deps_checked ? "No C compiler found" : "Looking for compilers…", ctrl, deps_checked ? BAD : DIM)
+			if deps_checked && button(g, {ctrl.x + ctrl.w + px(g, 12), ctrl.y, px(g, 150), ctrl.h}, "Where to get one", active) {no_compiler_dialog = 1}
+		} else {
+			names := make([]string, len(cs), context.temp_allocator)
+			sel := 0
+			for c, i in cs {
+				names[i] = c.label
+				if c.path == settings.compiler {sel = i}
+			}
+			if n, ch := dropdown(g, "compiler", ctrl, names, sel, active = active); ch {select_compiler(cs[n].path); changed = true}
+			note_text(g, cs[sel].path, note, DIM)
+		}
+	}
+	// Optimization Level
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Optimization Level:")
+		levels := OPT_LEVELS
+		if n, ch := dropdown(g, "opt", ctrl, levels[:], settings.opt_level, active = active); ch {settings.opt_level = n; changed = true}
+		note_text(g, "Higher: a slower build, a faster game", note, DIM)
 	}
 	// Profile-Guided Optimization
 	{
@@ -566,25 +640,45 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 		if on, ch := toggle(g, ctrl, settings.pgo, active); ch {settings.pgo = on; changed = true}
 		why := pgo_blocked()
 		pgo_note := !settings.pgo ? "Off: the game built without the profile" : why == "" ? "On: optimized for how the game runs (a faster game)" : why
-		label(g, g.small, pgo_note, note, settings.pgo && why != "" ? WARN : DIM)
+		note_text(g, pgo_note, note, settings.pgo && why != "" ? WARN : DIM)
 	}
 	// Link-Time Optimization
 	{
 		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Link-Time Optimization:")
 		if on, ch := toggle(g, ctrl, settings.lto, active); ch {settings.lto = on; changed = true}
 		lto_note := !settings.lto ? "Off: a faster Build" : lto_on() ? "On: optimizes across files (a much slower Build)" : "Needs LLVM's linker (lld) beside Clang: not found"
-		label(g, g.small, lto_note, note, settings.lto && !lto_on() ? WARN : DIM)
+		note_text(g, lto_note, note, settings.lto && !lto_on() ? WARN : DIM)
 	}
 	// Experimental Optimizations
 	{
 		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Experimental Optimizations:")
 		if on, ch := toggle(g, ctrl, settings.experimental, active); ch {settings.experimental = on; changed = true}
-		label(g, g.small, settings.experimental ? "On: less-tested speed-ups that may break things" : "Off: only the tested ones", note, settings.experimental ? WARN : DIM)
+		note_text(g, settings.experimental ? "On: less-tested speed-ups that may break things" : "Off: only the tested ones", note, settings.experimental ? WARN : DIM)
 	}
+	// Debug & Profile Tools
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Debug & Profile Tools:")
+		if on, ch := toggle(g, ctrl, settings.tools, active); ch {settings.tools = on; changed = true}
+		note_text(g, settings.tools ? "Logs, tracing, the profiler and an FPS counter (console window)" : "Off: no console window, nothing printed", note, DIM)
+	}
+	opt_content_h = row + px(g, 12)
 	if changed {save_settings()}
 	if game_changed {
 		gdir := game_out_dir()
 		if file_exists(pjoin({gdir, GAME_NAME + ".cfg"}, context.temp_allocator)) {_ = write_cfg(gdir)}
+	}
+}
+
+// an option's note beside its control: wrapped, two lines at most (the second cut with an ellipsis), centered in its row
+note_text :: proc(g: ^Gui, s: string, r: ui.Rect, c: ren.Color) {
+	lines := wrap(g.small, s, r.w)
+	n := min(len(lines), 2)
+	y0 := r.y + max(0, (r.h - n * g.small.line_height) / 2)
+	for l, i in lines {
+		if i == 2 {break}
+		t := l
+		if i == 1 && len(lines) > 2 {t = fit(g.small, strings.concatenate({l, " ", lines[2]}, context.temp_allocator), r.w)}
+		ren.draw_text(g.dl, g.small, t, {r.x, y0 + i * g.small.line_height}, c)
 	}
 }
 

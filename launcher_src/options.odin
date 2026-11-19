@@ -12,6 +12,8 @@
 //   Graphics Driver           Vulkan, the default everywhere (the launcher always builds it in: -DXRC_VULKAN);
 //                             D3D9 (Windows only): -DXRC_D3D9_DEFAULT -- the system's Direct3D 9, which is broken
 //                             for now (the cutscene after the first fight never plays)
+//   Gamepad Scanning          Once: -DXRC_PAD_ONCE -- the game controllers looked for once, at the start (else every 2
+//                             seconds, the default: the game asks that often; src/runtime/ref_dinput.c, hle_dinput.c)
 //   Cutscenes                 Auto-skip: -DXRC_SKIP_MOVIES (every movie skipped; the background conversion goes on)
 //   Cutscene Convert Threads  -DXRC_MOVIE_THREADS=N: the CPUs and encoder threads of the background conversion;
 //                             Convert Movies (movies.odin) runs the converter with as many (--threads N). Off: no
@@ -30,6 +32,9 @@
 //                             settings: Method MSAA (the game's -MSAA=Quality) or FXAA (the default: -MSAA=0 and
 //                             XRC_FXAA=Quality, a filter on the 3D image before the HUD -- vk_d3d9.c), Quality 1x (off),
 //                             2x, 4x (the default), 8x
+//   Effects Resolution        Half (the default) or Full: the blended effects that add light (fire, sparks, magic)
+//                             drawn into a half-size image and added to the 3D image (vk_d3d9.c, Vulkan only); Full:
+//                             XRC_VK_HALF_FX=0 in WhiteRecomp.cfg, no Build needed
 //   Memory                    4 GB (the default) or 2 GB: the guest address space the game runs in; 2 GB is what the
 //                             original exe gets (not large-address-aware): XRC_GUEST_2GB=1 in WhiteRecomp.cfg, no
 //                             Build needed (src/runtime/xrc_rt.h's layout)
@@ -169,6 +174,7 @@ runtime_option_flags :: proc(spec: Build_Spec = {}) -> []string {
 	if !settings.tools {append(&f, "-DXRC_NO_TOOLS")}
 	if !settings.vulkan && ODIN_OS == .Windows && spec.cross == nil {append(&f, "-DXRC_D3D9_DEFAULT")}
 	if settings.skip_movies {append(&f, "-DXRC_SKIP_MOVIES")}
+	if settings.pad_once {append(&f, "-DXRC_PAD_ONCE")}
 	if settings.experimental {append(&f, "-DXRC_EXPERIMENTAL")}
 	append(&f, fmt.tprintf("-DXRC_MOVIE_THREADS=%d", convert_threads()))
 	return f[:]
@@ -199,7 +205,7 @@ GRAPHICS_PRESETS :: [4]Graphics_Preset {
 	{shadow_res = 8192, aa_quality = 8}, // Ultrafancy: the most of both
 }
 GRAPHICS_KEYS :: [5]string{"ultrafast", "fast", "fancy", "ultrafancy", "custom"} // (in settings.txt)
-GRAPHICS_NAMES :: [5]string{"Ultrafast (Worst Quality)", "Fast", "Fancy (DEFAULT)", "Ultrafancy", "Custom"}
+GRAPHICS_NAMES :: [5]string{"Ultrafast (Worst Quality)", "Fast", "Fancy (Default)", "Ultrafancy", "Custom"}
 
 // a preset's values into the three options (Custom: as they are)
 graphics_apply :: proc() {

@@ -8,6 +8,8 @@
 /WhiteRecompLauncher_windows.exe
 /WhiteRecompLauncher_linux
 /WhiteRecompLauncher_linux_arm64
-# made by build.sh, embedded in the launchers
+# made by build.sh, embedded in the launchers; never C sources (launcher/publish.sh refuses them)
 bundle.bin
 *.o
+*.c
+*.h

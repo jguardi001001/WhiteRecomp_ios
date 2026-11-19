@@ -17,12 +17,20 @@ set -eu
 cd "$(dirname "$0")/.."
 GH_REPO=ps4star/WhiteRecomp
 WINGIT="/mnt/c/Program Files/Git/cmd/git.exe"
+# no_sources REPO: stops if the repo has (tracked, or about to be) any C source or the bundle. The translated game code
+# is only ever shipped inside the launcher executables (embedded bundle.bin), never as files
+no_sources() {
+	bad=$(cd "$1" && { "$WINGIT" ls-files; "$WINGIT" ls-files --others --exclude-standard; } | tr -d '\r' |
+		grep -iE '\.(c|h|cc|cpp|hpp|inc)$|(^|/)bundle\.bin$|(^|/)page_[0-9a-f]+\.' || true)
+	[ -z "$bad" ] || { echo "publish: $1 has source files that must not be published:"; echo "$bad" | head -20; exit 1; }
+}
 if [ "${1:-}" = release ]; then
 	TAG=${2:?usage: launcher/publish.sh release TAG [REPO]}
 	REPO=${3:-/mnt/c/Users/psivstar/Documents/proj/WhiteRecomp}
 	for f in build/WhiteRecompLauncher_windows.exe build/WhiteRecompLauncher_linux build/WhiteRecompLauncher_linux_arm64; do
 		[ -f "$f" ] || { echo "publish: $f is missing (launcher/build.sh all, launcher/build.sh linux_arm64)"; exit 1; }
 	done
+	no_sources "$REPO"
 	TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | "$WINGIT" credential fill | sed -n 's/^password=//p')
 	[ -n "$TOKEN" ] || { echo "publish: not signed in to GitHub"; exit 1; }
 	SHA=$(cd "$REPO" && "$WINGIT" rev-parse origin/main | tr -d '\r')
@@ -63,6 +71,7 @@ rm -f "$REPO/README.txt" # (the plain-text one before README.md)
 sed 's/\r*$/\r/' launcher/release/THIRD_PARTY_LICENSES.txt > "$REPO/THIRD_PARTY_LICENSES.txt"
 rsync -a --delete --exclude bundle.bin --exclude shared --exclude README.md launcher/ "$REPO/launcher_src/"
 rsync -a --delete --exclude ols.json shared/ "$REPO/launcher_src/shared/"
+no_sources "$REPO"
 cat > "$REPO/launcher_src/README.md" <<'MD'
 # WhiteRecomp launcher sources
 
@@ -91,9 +100,11 @@ cat > "$REPO/.gitignore" <<'GI'
 /WhiteRecompLauncher_windows.exe
 /WhiteRecompLauncher_linux
 /WhiteRecompLauncher_linux_arm64
-# made by build.sh, embedded in the launchers
+# made by build.sh, embedded in the launchers; never C sources (launcher/publish.sh refuses them)
 bundle.bin
 *.o
+*.c
+*.h
 GI
 cat > "$REPO/.gitattributes" <<'GA'
 *.exe binary

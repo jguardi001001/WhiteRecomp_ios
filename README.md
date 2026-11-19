@@ -44,13 +44,109 @@ Put the launcher in a folder of its own. **Build** creates the game beside it.
 The **Options** tab is saved between sessions.
 
 - **Build options:** most options change how the game is compiled, so they take effect the next time you press **Build**.
-- **Game options:** **Graphics** and **Memory** are passed to the game when it starts. They take effect the next time you start the game, with no rebuild.
+- **Game options:** **Resolution**, **Window Scaling**, **Graphics**, **Effects Resolution**, **Cutscene Convert Threads**, **Pipeline Build Threads** and **Memory** are passed to the game when it starts. They take effect the next time you start the game, with no rebuild.
 
-### Compiler
+The options are grouped as on the tab: Display, Graphics, Audio & Controls, Cutscenes, Performance and Build.
 
-The C compiler that builds the game. The launcher finds every GCC and Clang on the system and lists Clang first, marked **(BEST)**. Clang produces a noticeably faster game, about 15% less CPU time per frame than GCC.
+### Display
 
-### Optimization Level
+#### Resolution
+
+The resolution the game renders at, passed to the game as `-Width=W -Height=H`: 854 x 480, 960 x 540, **1280 x 720** (default), 1600 x 900, 1920 x 1080, 2560 x 1440, 3200 x 1800 or 3840 x 2160. Higher is sharper and costs more GPU time; 480 and 540 are for slow GPUs. Takes effect the next time the game starts, with no Build needed.
+
+The game's window opens at this size. You can resize or maximize it, and **F11** switches fullscreen on and off. The picture is scaled to fit the window with its shape kept, so a window of another shape gets black bars (a maximized window too: the title bar and taskbar take some of its height).
+
+#### Window Scaling
+
+**Fit** (default) keeps the picture's 16:9 shape, with black bars in a window of another shape. **Stretch** fills the whole window, squeezing the picture to the window's shape. Takes effect the next time the game starts, with no Build needed.
+
+#### FPS
+
+The frame rate cap: **30** or **60** (default). The game's logic runs in 1/60 s steps, so these are the two supported rates.
+
+#### Graphics Driver
+
+- **Vulkan (Recommended)**, the default and the only choice on Linux: the port's own renderer.
+- **D3D9** (Windows only): Windows' own Direct3D 9. It's currently broken: the game stops at the cutscene after the first fight.
+
+### Graphics
+
+#### Graphics
+
+A preset for shadows and anti-aliasing. Takes effect the next time the game starts.
+
+| Choice | Shadows | Anti-aliasing |
+| --- | --- | --- |
+| Ultrafast (Worst Quality) | Off | Off |
+| Fast | 512 x 512 | 2x FXAA |
+| **Fancy (Default)** | 1024 x 1024, the game's default | 4x FXAA |
+| Ultrafancy | 8192 x 8192 | 8x FXAA |
+| Custom | As set below | As set below |
+
+**Custom** shows three more options under Graphics:
+
+- **Shadow Resolution:** the size of the shadow maps, passed to the game as `-Shadow=N` exactly as the original launcher does. **Off** draws no shadow maps at all (the fastest); 512 is blurrier and cheaper; 1024 is the game's default; 2048, 4096 and 8192 (the original launcher's maximum) are sharper and costlier.
+- **Anti-alias Method:**
+  - **FXAA** (default): a cheap smoothing filter on the 3D image, applied before the HUD is drawn so the HUD stays sharp.
+  - **MSAA:** the game's own multisampling, passed as `-MSAA=N` like the original launcher. Sharper on fine detail, but costly, especially on integrated GPUs.
+- **Anti-alias Quality:** **1x** (off), **2x**, **4x** (default) or **8x**. For FXAA, higher smooths longer edges; for MSAA it's the samples per pixel, and if your GPU can't do the count you pick, the game uses the most it supports.
+
+#### Effects Resolution
+
+How the game's glowing effects (fire, sparks, magic, most of a battle's spell effects) are drawn. Vulkan only; takes effect the next time the game starts, with no Build needed.
+
+- **Half (Default):** the effects that add light are drawn at half the resolution and then added to the picture. They cost about a quarter of the GPU time, which matters in effect-heavy battles on integrated GPUs. They look a little softer, and an effect just behind the edge of a character can show slightly past it.
+- **Full:** every effect at full resolution, as the original game draws them.
+
+### Audio & Controls
+
+#### Audio
+
+- **On** (default): music, sound effects and voices.
+- **Off:** no sound output and no audio processing at all, for example if you want to play your own music. The game's audio engine is replaced by a silent stand-in that only keeps time.
+
+#### Gamepad Scanning
+
+How the game finds controllers. FINAL FANTASY XIII only reads DirectInput controllers; on Linux, any controller SDL2 knows (Xbox, PlayStation, Switch and most others) is presented to the game as an Xbox 360 controller.
+
+- **Every 2 seconds (Default):** a controller plugged in while you play is found within 2 seconds.
+- **Once:** only the controllers connected when the game starts are used. Plug one in later and you need to restart the game.
+
+### Cutscenes
+
+#### Cutscenes
+
+FINAL FANTASY XIII's cutscenes are Bink 2 videos, which the port can't play directly. Each one is converted to an MP4 once. **Convert Movies** on the Home tab does them all, and while you play the game also converts missing ones quietly in the background, one at a time.
+
+- **Play if converted** (default): a cutscene plays once its MP4 exists. Until then it's skipped.
+- **Auto-skip:** every cutscene is skipped, even converted ones, which is handy for replays and speedruns. Background conversion continues, so the movies are ready if you switch back (followed by a new Build).
+
+#### Cutscene Convert Threads
+
+How many CPU threads movie conversion uses, both for **Convert Movies** and for background conversion while you play. The default is **1**, so conversion doesn't slow the game down. Raise it to make **Convert Movies** finish sooner. The maximum is your CPU count minus one.
+
+**Off** stops the background conversion while you play (no Build needed). **Convert Movies** still works, with 1 thread.
+
+### Performance
+
+#### Pipeline Build Threads
+
+How many threads prepare the renderer's graphics pipelines in the background. A new effect or area needs new pipelines the first time it appears, and until one is ready the objects using it are skipped for a frame or two. The default, marked **(Best)**, is half your CPU threads (at most 8). The maximum is your CPU threads minus one (at most 16). Takes effect the next time the game starts, with no Build needed.
+
+#### Memory
+
+How much memory the game can address.
+
+- **4GB (Recommended)** (default): the address space a 4 GB-patched exe gets.
+- **2GB:** what the original, unpatched exe gets.
+
+### Build
+
+#### Compiler
+
+The C compiler that builds the game. The launcher finds every GCC and Clang on the system and lists Clang first, marked **(Best)**. Clang produces a noticeably faster game, about 15% less CPU time per frame than GCC.
+
+#### Optimization Level
 
 How hard the compiler optimizes the game. The default is **1**.
 
@@ -63,12 +159,28 @@ How hard the compiler optimizes the game. The default is **1**.
 
 Levels above 1 haven't measured faster than 1.
 
-### Audio
+#### Profile-Guided Optimization
 
-- **On** (default): music, sound effects and voices.
-- **Off:** no sound output and no audio processing at all, for example if you want to play your own music. The game's audio engine is replaced by a silent stand-in that only keeps time.
+- **On** (default): the game is compiled with a profile recorded while playing it, so the compiler optimizes for how the game actually runs: about 6% less CPU time per frame on the game's main thread.
+- **Off:** built without the profile.
 
-### Debug & Profile Tools
+It needs **Clang**; with GCC it's skipped. On Windows it also needs LLVM's linker (`ld.lld.exe`) next to `clang.exe` (MSYS2: the `mingw-w64-ucrt-x86_64-lld` package); the launcher says so if it's missing. If your Clang is too old to read the profile, the Build says so and goes on without it.
+
+#### Link-Time Optimization
+
+- **Off** (default): each source file is optimized on its own. This is the faster Build.
+- **On:** the compiler also optimizes across files when it links the game (`-flto`), which can make the game a little faster. The Build takes noticeably longer.
+
+With Clang on Windows, this needs LLVM's linker (`ld.lld.exe`) next to `clang.exe`. In MSYS2 that's the `mingw-w64-ucrt-x86_64-lld` package. If it's missing, the launcher says so and builds without LTO. GCC, and Clang on Linux, need nothing extra.
+
+#### Experimental Optimizations
+
+- **Off** (default): only tested optimizations.
+- **On:** also enables newer optimizations that are less tested and **may break things**, such as visual glitches, crashes or a softlock.
+
+Turn it off again (and Build) if anything goes wrong. Bug reports from playing with it on are welcome; please say it was on.
+
+#### Debug & Profile Tools
 
 - **Off** (default): the game prints nothing and, on Windows, opens no console window.
 - **On:** a console window with logs, plus:
@@ -78,93 +190,13 @@ Levels above 1 haven't measured faster than 1.
 
   These cost almost nothing while unused.
 
-### FPS
-
-The frame rate cap: **30** or **60** (default). The game's logic runs in 1/60 s steps, so these are the two supported rates.
-
-### Graphics Driver
-
-- **Vulkan (Recommended)**, the default and the only choice on Linux: the port's own renderer.
-- **D3D9** (Windows only): Windows' own Direct3D 9. It's currently broken: the game stops at the cutscene after the first fight.
-
-### Cutscenes
-
-FINAL FANTASY XIII's cutscenes are Bink 2 videos, which the port can't play directly. Each one is converted to an MP4 once. **Convert Movies** on the Home tab does them all, and while you play the game also converts missing ones quietly in the background, one at a time.
-
-- **Play if converted** (default): a cutscene plays once its MP4 exists. Until then it's skipped.
-- **Auto-skip:** every cutscene is skipped, even converted ones, which is handy for replays and speedruns. Background conversion continues, so the movies are ready if you switch back (followed by a new Build).
-
-### Cutscene Convert Threads
-
-How many CPU threads movie conversion uses, both for **Convert Movies** and for background conversion while you play. The default is **1**, so conversion doesn't slow the game down. Raise it to make **Convert Movies** finish sooner. The maximum is your CPU count minus one.
-
-**Off** stops the background conversion while you play (no Build needed). **Convert Movies** still works, with 1 thread.
-
-### Pipeline Build Threads
-
-How many threads prepare the renderer's graphics pipelines in the background. A new effect or area needs new pipelines the first time it appears, and until one is ready the objects using it are skipped for a frame or two. The default, marked **(Best)**, is half your CPU threads (at most 8). The maximum is your CPU threads minus one (at most 16). Takes effect the next time the game starts, with no Build needed.
-
-### Resolution
-
-The resolution the game renders at, passed to the game as `-Width=W -Height=H`: 854 x 480, 960 x 540, **1280 x 720** (default), 1600 x 900, 1920 x 1080, 2560 x 1440, 3200 x 1800 or 3840 x 2160. Higher is sharper and costs more GPU time; 480 and 540 are for slow GPUs. Takes effect the next time the game starts, with no Build needed.
-
-The game's window opens at this size. You can resize or maximize it, and **F11** switches fullscreen on and off. The picture is scaled to fit the window with its shape kept, so a window of another shape gets black bars.
-
-### Graphics
-
-A preset for shadows and anti-aliasing. Takes effect the next time the game starts.
-
-| Choice | Shadows | Anti-aliasing |
-| --- | --- | --- |
-| Ultrafast (Worst Quality) | Off | Off |
-| Fast | 512 x 512 | 2x FXAA |
-| **Fancy (DEFAULT)** | 1024 x 1024, the game's default | 4x FXAA |
-| Ultrafancy | 8192 x 8192 | 8x FXAA |
-| Custom | As set below | As set below |
-
-**Custom** shows three more options under Graphics:
-
-- **Shadow Resolution:** the size of the shadow maps, passed to the game as `-Shadow=N` exactly as the original launcher does. **Off** draws no shadow maps at all (the fastest); 512 is blurrier and cheaper; 1024 is the game's default; 2048, 4096 and 8192 (the original launcher's maximum) are sharper and costlier.
-- **Anti-alias Method:**
-  - **FXAA** (default): a cheap smoothing filter on the 3D image, applied before the HUD is drawn so the HUD stays sharp.
-  - **MSAA:** the game's own multisampling, passed as `-MSAA=N` like the original launcher. Sharper on fine detail, but costly, especially on integrated GPUs.
-- **Anti-alias Quality:** **1x** (off), **2x**, **4x** (default) or **8x**. For FXAA, higher smooths longer edges; for MSAA it's the samples per pixel, and if your GPU can't do the count you pick, the game uses the most it supports.
-
-### Memory
-
-How much memory the game can address.
-
-- **4GB (Recommended)** (default): the address space a 4 GB-patched exe gets.
-- **2GB:** what the original, unpatched exe gets.
-
-### Profile-Guided Optimization
-
-- **On** (default): the game is compiled with a profile recorded while playing it, so the compiler optimizes for how the game actually runs: about 6% less CPU time per frame on the game's main thread.
-- **Off:** built without the profile.
-
-It needs **Clang**; with GCC it's skipped. On Windows it also needs LLVM's linker (`ld.lld.exe`) next to `clang.exe` (MSYS2: the `mingw-w64-ucrt-x86_64-lld` package); the launcher says so if it's missing. If your Clang is too old to read the profile, the Build says so and goes on without it.
-
-### Link-Time Optimization
-
-- **Off** (default): each source file is optimized on its own. This is the faster Build.
-- **On:** the compiler also optimizes across files when it links the game (`-flto`), which can make the game a little faster. The Build takes noticeably longer.
-
-With Clang on Windows, this needs LLVM's linker (`ld.lld.exe`) next to `clang.exe`. In MSYS2 that's the `mingw-w64-ucrt-x86_64-lld` package. If it's missing, the launcher says so and builds without LTO. GCC, and Clang on Linux, need nothing extra.
-
-### Always on
+#### Always on
 
 Every Build also uses these, with no option to turn them off:
 
 - **`-march=native`:** the game is compiled for your own CPU's instruction set, since the computer that builds it is the one that plays it. A game built on one computer may not run on an older CPU.
 - **Fast math (`-ffast-math -fno-associative-math`):** faster floating-point code. The parts of the translated code that must behave exactly like an x86 CPU (NaN checks, float compares, float-to-integer conversions) are written so fast math can't change them. Reassociation (regrouping sums) stays off, because it breaks the game's own rounding tricks: the title menu disappears. Other results may differ from the original in the last bits.
 - **On Linux:** the distributions' hardening defaults (position-independent executables, control-flow protection, stack protector) are turned off. They cost speed and protect nothing here.
-
-### Experimental Optimizations
-
-- **Off** (default): only tested optimizations.
-- **On:** also enables newer optimizations that are less tested and **may break things**, such as visual glitches, crashes or a softlock.
-
-Turn it off again (and Build) if anything goes wrong. Bug reports from playing with it on are welcome; please say it was on.
 
 ## Cross-Compile
 

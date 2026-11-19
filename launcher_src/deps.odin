@@ -41,7 +41,7 @@ deps_checked: bool
 Compiler :: struct {
 	path:  string,
 	clang: bool,
-	label: string, // what the Options tab lists: "Clang (BEST)", "GCC", ...
+	label: string, // what the Options tab lists: "Clang (Best)", "GCC", ...
 }
 compilers: [dynamic]Compiler
 
@@ -222,7 +222,7 @@ check_compiler :: proc(t: ^Task) -> Dep {
 		first_clang := true
 		for &c in found {
 			name := c.clang ? "Clang" : "GCC"
-			if c.clang && first_clang {name = "Clang (BEST)"; first_clang = false}
+			if c.clang && first_clang {name = "Clang (Best)"; first_clang = false}
 			many := c.clang ? nclang > 1 : ngcc > 1
 			c.label = many ? fmt.aprintf("%s — %s", name, c.path) : strings.clone(name)
 		}

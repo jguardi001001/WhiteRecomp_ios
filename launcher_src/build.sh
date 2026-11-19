@@ -2,7 +2,8 @@
 # launcher/build.sh [windows|linux|linux_arm64|all] [odin build flags]   (WSL; default windows; all: windows and linux)
 # Builds the launcher: build/WhiteRecompLauncher_windows.exe (Windows), build/WhiteRecompLauncher_linux (Linux x86-64),
 # build/WhiteRecompLauncher_linux_arm64 (Linux ARM64: builds and runs the game on the ARM64 machine itself).
-#   1. packs what it carries into its bundle.bin (ff bundle): the translated code (build/xrc_gen: run
+#   1. packs what it carries into its bundle.bin (ff bundle --stage, xz per block, ff bundle --pack: LZMA blocks, unpacked
+#      by launcher/lzma): the translated code (build/xrc_gen: run
 #      tools/xrc_build.sh first), the runtime (src/runtime), xrc.h, the Vulkan headers (third_party/vulkan), the
 #      profile for Profile-Guided Optimization (build/pgo/ff13.profdata: tools/xrc_build.sh XRC_PGO says how), FFmpeg's
 #      static libraries for the target with their headers and license (third_party/ffmpeg: the game links them, for
@@ -17,7 +18,7 @@
 #      vendor/stb/src/build_stb.sh unix) and libwayland-client. Linux ARM64: the same for -target:linux_arm64, linked
 #      by clang with build/arm64_tools (tools/arm64_toolchain.sh: the sysroot has libwayland-client), Odin's stb
 #      compiled for ARM64 into the staging folder.
-# Env: ODIN (odin.exe), LAUNCHER_NO_BUNDLE=1 keeps the target's existing bundle.bin.
+# Env: ODIN (odin.exe), LAUNCHER_NO_BUNDLE=1 keeps the target's existing bundle.bin, LAUNCHER_XZ_J (xz processes, 12).
 # The launcher's git repo (WhiteRecomp): launcher/publish.sh.
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -45,7 +46,8 @@ for T in $TARGETS; do
 			build/arm64_tools/sysroot_min/usr/lib/aarch64-linux-gnu/libc.so third_party/ffmpeg/lib/linux_arm64/libavcodec.a; do
 			[ -f "$f" ] || { echo "launcher: $f is missing (build it first)"; exit 1; }
 		done
-		./build/ff.exe bundle --out "$(M "$STAGE/launcher/bundle.bin")" \
+		BLK="$STAGE/bundle_blocks"
+		./build/ff.exe bundle --stage "$(M "$BLK")" \
 			"$(M build/xrc_gen/src)=gen/src" "$(M build/xrc_gen/xrc_table.c)=gen/xrc_table.c" \
 			"$(M build/xrc_gen/match)=gen/match" \
 			"$(M src/runtime)=runtime" "$(M src/include/xrc.h)=include/xrc.h" \
@@ -58,6 +60,18 @@ for T in $TARGETS; do
 			"$(M build/arm64_tools/sysroot_min)=cross/linux_arm64/sysroot" \
 			"$(M third_party/ffmpeg/lib/linux_arm64)=cross/linux_arm64/ffmpeg/lib" \
 			${FFEXE:+"$(M $FFEXE/ffmpeg.exe)=tools/ffmpeg.exe" "$(M $FFEXE/LICENSE)=tools/ffmpeg-LICENSE.txt" "$(M $FFEXE/README.txt)=tools/ffmpeg-README.txt"} || exit 1
+		# each block compressed by xz (LZMA, its dictionary the whole block), cached by its contents in build/bundle_cache:
+		# the targets share most blocks (the translated code), and a rebuild compresses only the blocks that changed
+		mkdir -p build/bundle_cache
+		export BLK
+		ls "$BLK"/block_*.raw | xargs -P "${LAUNCHER_XZ_J:-12}" -n 1 sh -c '
+			r=$1; c="build/bundle_cache/$(sha256sum < "$r" | cut -c1-64).lzma"
+			if [ ! -f "$c" ]; then
+				m=$(( ($(stat -c %s "$r") + 1048575) / 1048576 )); [ $m -lt 1 ] && m=1
+				xz --format=lzma --lzma1=preset=9e,dict=${m}MiB -c "$r" > "$c.tmp" && mv "$c.tmp" "$c" || exit 1
+			fi
+			cp "$c" "${r%.raw}.lzma"' _ || { echo "launcher: compressing the bundle failed"; exit 1; }
+		./build/ff.exe bundle --pack "$(M "$BLK")" --out "$(M "$STAGE/launcher/bundle.bin")" || exit 1
 	fi
 	case $T in
 	windows)

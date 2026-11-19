@@ -37,7 +37,7 @@ cross_targets := []Cross_Target {
 		name = "Linux ARM64",
 		triple = "aarch64-linux-gnu",
 		cpus = {
-			{"generic", "Any ARM64 CPU (DEFAULT)"},
+			{"generic", "Any ARM64 CPU (Default)"},
 			{"cortex-a72", "Raspberry Pi 4 (Cortex-A72)"},
 			{"cortex-a76", "Raspberry Pi 5 (Cortex-A76)"},
 			{"apple-m1", "Apple M1 / M2 (Asahi Linux)"},
