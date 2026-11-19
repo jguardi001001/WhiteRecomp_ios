@@ -164,8 +164,16 @@ main :: proc() {
 	task_start("Checking", check_all_task)
 
 	ctx: input.Context(Signal)
+	// The frame rate: 60 a second for a second after anything happened (input, a window event, a task running, a dialog
+	// open), else 20. The renderer's present does not hold the loop back everywhere: Vulkan's MAILBOX mode (taken
+	// when offered: Mesa on Linux does) returns at once, and the launcher drew as fast as it could (70% of the CPU).
+	last_active := time.tick_now()
 	for !app.window.close_requested {
-		iv.pump(app, &ctx)
+		frame_start := time.tick_now()
+		win_events := iv.pump(app, &ctx)
+		if len(app.window.input) > 0 || win_events != {} || sync.atomic_load(&task.running) || confirm_discard || browser_is_open() {
+			last_active = frame_start
+		}
 		mx, my := input.mouse_position(&ctx)
 		g.mouse = {int(mx), int(my)}
 		g.clicked = input.mouse_pressed(&ctx, .Left)
@@ -185,8 +193,9 @@ main :: proc() {
 		draw_window(&g, app.window)
 		gui_end(&g)
 		ren.end_frame(&app.renderer)
-		if ren.renderer_is_null(&app.renderer) {time.sleep(16 * time.Millisecond)}
 		free_all(context.temp_allocator)
+		period := time.tick_since(last_active) < time.Second ? 16667 * time.Microsecond : 50 * time.Millisecond
+		if spent := time.tick_since(frame_start); spent < period {time.sleep(period - spent)}
 	}
 	task_cancel()
 	if task.th != nil {thread_join_task()}
