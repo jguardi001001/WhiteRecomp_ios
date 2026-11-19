@@ -1,6 +1,6 @@
 # WhiteRecomp
 
-WhiteRecomp builds a native port of **FINAL FANTASY XIII** on your own computer. It uses the sources it carries and your own Steam copy of the game.
+WhiteRecomp builds a native port of **FINAL FANTASY XIII** on your own computer. It uses your own Steam version of the game to do this.
 
 > [!IMPORTANT]
 > WhiteRecomp does **not** contain the game. You need FINAL FANTASY XIII installed from Steam (the current Steam version).
