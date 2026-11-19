@@ -80,7 +80,7 @@ convert_task :: proc(t: ^Task) {
 		logf(t, "Converting %d movies (about an hour and a half of video; it can be cancelled and continued later)", todo)
 		set_status(t, 0, "Converting: 0 of %d", todo)
 		// as many encoder threads as the Options tab's Cutscene Convert Threads (as the game's background conversion)
-		threads := fmt.tprintf("%d", clamp(settings.convert_threads, 1, max_convert_threads()))
+		threads := fmt.tprintf("%d", convert_threads())
 		logf(t, "Converting with %s thread(s) (Options: Cutscene Convert Threads)", threads)
 		code, started := run(t, {tool, "--dll", dll, "--ffmpeg", ff.path, "--threads", threads, "all", dir, dir}, on_line = proc(t: ^Task, line: string) {
 			// "<in>: 1280x736 (out 1280x720), 5160 frames at 29.970 fps, 4 audio tracks -> <out>" starts one,

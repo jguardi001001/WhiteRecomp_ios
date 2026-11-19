@@ -126,6 +126,8 @@ when ODIN_OS == .Windows {
 } else {
 	@(rodata) LINK_LIBS := []string{"-pthread", "-lm", "-ldl"} // (-ldl: Vulkan and SDL2 are loaded at run time)
 }
+// a cross build's (cross.odin: Linux targets): FFmpeg's OpenSSL, and the game's own
+@(rodata) CROSS_LINUX_SYS_LIBS := []string{"-l:libssl.so.3", "-l:libcrypto.so.3", "-pthread", "-lm", "-ldl"}
 arch_flags :: proc() -> []string {return ARCH_FLAGS}
 link_libs :: proc() -> []string {return LINK_LIBS}
 

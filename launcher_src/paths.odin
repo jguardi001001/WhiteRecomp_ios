@@ -79,7 +79,9 @@ Settings :: struct {
 	fps:             int, // 30 or 60
 	vulkan:          bool, // Graphics Driver: Vulkan, the default (else Direct3D 9, Windows only)
 	skip_movies:     bool, // Cutscenes: Auto-skip
-	convert_threads: int, // Cutscene Convert Threads
+	convert_threads: int, // Cutscene Convert Threads (0: Off -- no conversion in the background while playing)
+	pipe_threads:    int, // Pipeline Build Threads: the renderer's pipeline builders (XRC_VK_PIPE_THREADS in the .cfg; 0: the best, options.odin)
+	resolution:      int, // Resolution: an index into RESOLUTIONS (options.odin) -- the game's -Width= / -Height=
 	graphics:        int, // Graphics: a preset of the three below (GRAPHICS_PRESETS), or GRAPHICS_CUSTOM -- them as set
 	shadow_res:      int, // Shadow Resolution: the game's -Shadow=N (512 .. 8192; 0: Off -- no shadows, XRC_NO_SHADOWS)
 	aa_fxaa:         bool, // Anti-alias Method: FXAA (a post-process at present: XRC_FXAA=quality in the .cfg, the game's -MSAA=0), else MSAA (the game's -MSAA=quality)
@@ -88,6 +90,8 @@ Settings :: struct {
 	lto:             bool, // Link-Time Optimization: -flto
 	pgo:             bool, // Profile-Guided Optimization (Clang): the bundled profile
 	memory_2gb:      bool, // Memory: 2 GB, as the original exe gets (XRC_GUEST_2GB=1 in the .cfg); else 4 GB
+	cross_target:    string, // the Cross-Compile tab's Target (cross.odin: a Cross_Target key; "": the first)
+	cross_cpu:       string, // its CPU (-mcpu=; "": the target's first, generic)
 }
 settings := Settings {
 	opt_level       = 1,
@@ -96,6 +100,7 @@ settings := Settings {
 	vulkan          = true,
 	convert_threads = 1,
 	graphics        = GRAPHICS_FANCY,
+	resolution      = RES_DEFAULT,
 	pgo             = true,
 	shadow_res      = 1024,
 	aa_fxaa         = true,
@@ -132,7 +137,11 @@ load_settings :: proc() {
 		case "skip_movies":
 			settings.skip_movies = v == "1"
 		case "convert_threads":
-			if n_ok && n >= 1 {settings.convert_threads = n}
+			if n_ok && n >= 0 {settings.convert_threads = n}
+		case "pipe_threads":
+			if n_ok && n >= 0 && n <= 16 {settings.pipe_threads = n}
+		case "resolution": // ("WxH": one of RESOLUTIONS, else the default)
+			for r, i in RESOLUTIONS {if v == fmt.tprintf("%dx%d", r.w, r.h) {settings.resolution = i}}
 		case "shadow_res":
 			if n_ok && (n == 0 || (n >= 512 && n <= 8192)) {settings.shadow_res = n}
 		case "experimental":
@@ -143,6 +152,10 @@ load_settings :: proc() {
 			settings.pgo = v != "0"
 		case "memory_2gb":
 			settings.memory_2gb = v == "1"
+		case "cross_target":
+			settings.cross_target = strings.clone(v)
+		case "cross_cpu":
+			settings.cross_cpu = strings.clone(v)
 		case "msaa": // (before version 3: MSAA only; Off kept, any other the new default, FXAA 4x)
 			if version < 3 && n_ok && n == 0 {settings.aa_quality = 1}
 		case "aa_method":
@@ -171,8 +184,14 @@ save_settings :: proc() {
 	fmt.sbprintf(&b, "vulkan %d\n", settings.vulkan ? 1 : 0)
 	fmt.sbprintf(&b, "skip_movies %d\n", settings.skip_movies ? 1 : 0)
 	fmt.sbprintf(&b, "convert_threads %d\n", settings.convert_threads)
+	fmt.sbprintf(&b, "pipe_threads %d\n", settings.pipe_threads)
 	keys := GRAPHICS_KEYS
 	fmt.sbprintf(&b, "graphics %s\n", keys[clamp(settings.graphics, 0, GRAPHICS_CUSTOM)])
+	{
+		res := RESOLUTIONS
+		r := res[clamp(settings.resolution, 0, len(res) - 1)]
+		fmt.sbprintf(&b, "resolution %dx%d\n", r.w, r.h)
+	}
 	fmt.sbprintf(&b, "shadow_res %d\n", settings.shadow_res)
 	fmt.sbprintf(&b, "aa_method %s\n", settings.aa_fxaa ? "fxaa" : "msaa")
 	fmt.sbprintf(&b, "aa_quality %d\n", settings.aa_quality)
@@ -180,5 +199,7 @@ save_settings :: proc() {
 	fmt.sbprintf(&b, "lto %d\n", settings.lto ? 1 : 0)
 	fmt.sbprintf(&b, "pgo %d\n", settings.pgo ? 1 : 0)
 	fmt.sbprintf(&b, "memory_2gb %d\n", settings.memory_2gb ? 1 : 0)
+	fmt.sbprintf(&b, "cross_target %s\n", settings.cross_target)
+	fmt.sbprintf(&b, "cross_cpu %s\n", settings.cross_cpu)
 	_ = os.write_entire_file(data_path("settings.txt"), b.buf[:])
 }

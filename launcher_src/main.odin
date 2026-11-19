@@ -1,5 +1,5 @@
 // The launcher: builds this project's FINAL FANTASY XIII port on the player's computer, from the sources it carries
-// (bundle.odin) and the player's own game (game.odin). Its window has two tabs:
+// (bundle.odin) and the player's own game (game.odin). Its window has three tabs:
 //   Home     where the game is, what the computer still needs (deps.odin: each with an Install button; an install
 //            that needs administrator asks for it then, for that program alone), what is running (task.odin: progress,
 //            a log, Cancel), and in the bottom right corner the three buttons:
@@ -7,6 +7,7 @@
 //              Convert Movies  the Bink movies to MP4, once (movies.odin)
 //              Discard Movies  frees the space of the Bink movies that have their MP4 (movies.odin)
 //   Options  how the game is built (options.odin): compiler, optimization, audio, tools, FPS, graphics, cutscenes
+//   Cross-Compile  the game built for another kind of computer (cross.odin: Linux ARM64), with Clang and lld
 // Without any C compiler, a dialog says where to get one. The look and the controls: widgets.odin.
 //
 // Build: launcher/build.sh (packs the sources with `ff bundle`, then odin build). Uses shared/ (the iv_* libraries).
@@ -86,6 +87,7 @@ wake_window :: proc() {} // (the window redraws every frame)
 Tab :: enum {
 	Home,
 	Options,
+	Cross,
 }
 tab: Tab
 confirm_discard: bool
@@ -125,6 +127,21 @@ main :: proc() {
 			for l in task.log {fmt.println(l)}
 			os.exit(task.failed ? 1 : 0)
 		}
+		if a == "--cross-build" { 	// (--cross-build [target]: the Cross-Compile tab's Build)
+			for b, i in os.args {if b == "--cross-build" && i + 1 < len(os.args) {settings.cross_target = os.args[i + 1]}}
+			task_start("Checking", check_all_task)
+			thread_join_task()
+			task_start("Cross-Compile", proc(t: ^Task) {cross_build_task(t)})
+			last := ""
+			for sync.atomic_load(&task.running) {
+				sync.mutex_lock(&task.mutex)
+				if task.status != last {last = strings.clone(task.status); fmt.println(last)}
+				sync.mutex_unlock(&task.mutex)
+				time.sleep(2 * time.Second)
+			}
+			for l in task.log {fmt.println(l)}
+			os.exit(task.failed ? 1 : 0)
+		}
 		if a == "--check" {
 			task_start("Checking", check_all_task)
 			thread_join_task()
@@ -137,7 +154,7 @@ main :: proc() {
 		}
 	}
 
-	app, ok := iv.open({title = "WhiteRecomp", width = 900, height = 640, min_width = 760, min_height = 560, background = [3]u8{WIN_BG.r, WIN_BG.g, WIN_BG.b}})
+	app, ok := iv.open({title = "WhiteRecomp", width = 1080, height = 760, min_width = 820, min_height = 640, background = [3]u8{WIN_BG.r, WIN_BG.g, WIN_BG.b}})
 	if !ok {
 		fmt.eprintln("WhiteRecomp: could not open a window")
 		os.exit(1)
@@ -208,13 +225,15 @@ thread_join_task :: proc() {
 draw_window :: proc(g: ^Gui, w: ^platform.Window) {
 	body := ui.inset_xy(g.screen, px(g, 24), px(g, 12))
 	bar, rest := ui.cut_top(body, px(g, 40))
-	tab = Tab(tabs(g, bar, {"Home", "Options"}, int(tab)))
+	tab = Tab(tabs(g, bar, {"Home", "Options", "Cross-Compile"}, int(tab)))
 	_, rest = ui.cut_top(rest, px(g, 16))
 	switch tab {
 	case .Home:
 		draw_home(g, w, rest)
 	case .Options:
 		draw_options(g, rest)
+	case .Cross:
+		draw_cross(g, rest)
 	}
 	if confirm_discard {draw_confirm(g, get_game())}
 	if no_compiler_dialog == 1 {draw_no_compiler(g)}
@@ -375,8 +394,8 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	label(g, g.font, running ? "The options can be changed once the current task has finished." : "Most apply at the next Build; Graphics and Memory the next time the game starts.", head, DIM)
 	_, rest = ui.cut_top(rest, px(g, 8))
 	custom := settings.graphics == GRAPHICS_CUSTOM
-	nrows := custom ? 16 : 13 // (the Custom graphics rows only under Custom)
-	row_h := clamp((rest.h - px(g, 24)) / 16, px(g, 34), px(g, 50)) // (the same height either way)
+	nrows := custom ? 18 : 15 // (the Custom graphics rows only under Custom)
+	row_h := clamp((rest.h - px(g, 24)) / 18, px(g, 30), px(g, 50)) // (the same height either way)
 	oc, _ := ui.cut_top(rest, nrows * row_h + px(g, 16))
 	card(g, oc)
 	oi := ui.inset_xy(oc, px(g, 20), px(g, 8))
@@ -453,6 +472,7 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 			label(g, g.small, "The port's Vulkan renderer", note, DIM)
 		}
 	}
+	game_changed := false // (an option of the game's .cfg: rewritten at once, no Build needed)
 	// Cutscenes (with its tooltip over the whole row)
 	{
 		whole, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Cutscenes:")
@@ -465,15 +485,35 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	{
 		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Cutscene Convert Threads:")
 		n_max := max_convert_threads()
+		names := make([]string, n_max + 1, context.temp_allocator)
+		names[0] = "Off"
+		for i in 1 ..= n_max {names[i] = i == 1 ? "1 (DEFAULT)" : fmt.tprintf("%d", i)}
+		sel := settings.convert_threads == 0 ? 0 : clamp(settings.convert_threads, 1, n_max)
+		if n, ch := dropdown(g, "threads", ctrl, names, sel, active = active); ch {settings.convert_threads = n; changed = true; game_changed = true}
+		label(g, g.small, sel == 0 ? "No converting while you play (Convert Movies uses 1)" : "CPU threads for converting (Convert Movies and in the background)", note, DIM)
+	}
+	// Pipeline Build Threads (in its .cfg: no Build needed)
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Pipeline Build Threads:")
+		n_max, best := max_pipe_threads(), best_pipe_threads()
 		names := make([]string, n_max, context.temp_allocator)
-		for i in 0 ..< n_max {names[i] = i == 0 ? "1 (DEFAULT)" : fmt.tprintf("%d", i + 1)}
-		sel := clamp(settings.convert_threads, 1, n_max) - 1
-		if n, ch := dropdown(g, "threads", ctrl, names, sel, active = active); ch {settings.convert_threads = n + 1; changed = true}
-		label(g, g.small, "CPU threads for converting (Convert Movies and in the background)", note, DIM)
+		for i in 0 ..< n_max {names[i] = i + 1 == best ? fmt.tprintf("%d (Best)", i + 1) : fmt.tprintf("%d", i + 1)}
+		sel := pipe_threads() - 1
+		if n, ch := dropdown(g, "pipes", ctrl, names, sel, active = active); ch {settings.pipe_threads = n + 1 == best ? 0 : n + 1; changed = true; game_changed = true}
+		label(g, g.small, "Threads preparing new graphics effects in the background; no Build needed", note, DIM)
+	}
+	// Resolution: the game's -Width= / -Height= (in its .cfg: no Build needed)
+	{
+		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Resolution:")
+		res := RESOLUTIONS
+		names := make([]string, len(res), context.temp_allocator)
+		for r, i in res {names[i] = i == RES_DEFAULT ? fmt.tprintf("%d x %d (DEFAULT)", r.w, r.h) : fmt.tprintf("%d x %d", r.w, r.h)}
+		sel := clamp(settings.resolution, 0, len(res) - 1)
+		if n, ch := dropdown(g, "resolution", ctrl, names, sel, active = active); ch {settings.resolution = n; changed = true; game_changed = true}
+		label(g, g.small, sel == RES_DEFAULT ? "What the game renders at; the window can be resized; no Build needed" : sel < RES_DEFAULT ? "Lower is faster on the GPU, less sharp; the window can be resized; no Build needed" : "Higher costs GPU time; the window can be resized; no Build needed", note, DIM)
 	}
 	// Graphics: a preset of Shadow Resolution and Anti-aliasing, or Custom -- those, indented below it. The game's
 	// arguments (in its .cfg: no Build needed)
-	game_changed := false
 	{
 		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Graphics:")
 		names := GRAPHICS_NAMES

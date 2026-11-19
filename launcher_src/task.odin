@@ -72,7 +72,8 @@ task_start :: proc(name: string, work: proc(t: ^Task), user: rawptr = nil) -> bo
 	delete(t.status)
 	t.status = ""
 	t.progress = -1
-	t.name = name
+	delete(t.name)
+	t.name = strings.clone(name) // (its own copy: a caller may pass a name made for one frame)
 	t.cancel = false
 	t.failed = false
 	t.work = work

@@ -22,6 +22,27 @@ import "core:time"
 
 REFERENCE :: ODIN_OS == .Windows
 
+// What a Build makes: the zero value is the game for this computer (the Home tab); the Cross-Compile tab's
+// (cross.odin) names another target, its Clang and lld, and where its files are
+Build_Spec :: struct {
+	cross:   ^Cross_Target,
+	cc, lld: string,
+	cpu:     string, // -mcpu=
+	sysroot: string, // the target's system files (unpacked from the bundle's cross/<target>/sysroot)
+	ffdir:   string, // the target's FFmpeg (lib/)
+	obj:     string,
+	out_dir: string,
+}
+
+// the target's flags before every other: its architecture (and, cross, the target and its system files)
+spec_arch_flags :: proc(spec: Build_Spec) -> []string {
+	if spec.cross == nil {return arch_flags()}
+	f := make([]string, 2, context.temp_allocator)
+	f[0] = fmt.tprintf("--target=%s", spec.cross.triple)
+	f[1] = fmt.tprintf("--sysroot=%s", spec.sysroot)
+	return f
+}
+
 @(private = "file")
 Unit :: struct {
 	src, obj: string,
@@ -35,7 +56,9 @@ mtime :: proc(p: string) -> time.Time {
 	return fi.modification_time
 }
 
-build_task :: proc(t: ^Task) {
+build_task :: proc(t: ^Task, spec: Build_Spec = {}) {
+	x := spec.cross
+	reference := REFERENCE && x == nil
 	game := settings.game_dir
 	exe := game_exe(game)
 	set_status(t, 0, "Checking the game")
@@ -44,7 +67,7 @@ build_task :: proc(t: ^Task) {
 		t.failed = true
 		return
 	}
-	cc := dep_get(.Compiler).path
+	cc := x != nil ? spec.cc : dep_get(.Compiler).path
 	if cc == "" {
 		log_line(t, "No C compiler that can build the game: install one first.")
 		t.failed = true
@@ -59,33 +82,44 @@ build_task :: proc(t: ^Task) {
 	if n < 0 {t.failed = true; return}
 	if cancelled(t) {return}
 	logf(t, "Sources: %s (%d files changed)", src, n)
-	pgo_prepare(t, cc, pjoin({src, "pgo", "ff13.profdata"}, context.temp_allocator))
+	if x != nil { 	// (the target's system files and FFmpeg)
+		xn := bundle_extract(t, data_dir, {fmt.tprintf("cross/%s/", x.key)})
+		if xn < 0 {t.failed = true; return}
+		if !file_exists(pjoin({spec.ffdir, "lib", "libavcodec.a"}, context.temp_allocator)) {
+			logf(t, "This launcher carries no files for %s.", x.name)
+			t.failed = true
+			return
+		}
+		logf(t, "%s system files: %s (%d files changed)", x.name, spec.sysroot, xn)
+	}
+	pgo_prepare(t, cc, pjoin({src, "pgo", "ff13.profdata"}, context.temp_allocator), spec)
 
 	// 3. compile
-	obj := data_path("obj")
+	obj := x != nil ? spec.obj : data_path("obj")
 	_ = os.make_directory_all(obj)
 	inc := pjoin({src, "include"}, context.temp_allocator)
 	rt := pjoin({src, "runtime"}, context.temp_allocator)
 	units := make([dynamic]Unit, context.temp_allocator)
 	page_flags := make([dynamic]string, context.temp_allocator)
-	append(&page_flags, ..arch_flags())
-	append(&page_flags, ..page_option_flags())
+	append(&page_flags, ..spec_arch_flags(spec))
+	append(&page_flags, ..page_option_flags(spec))
 	append(&page_flags, "-I", inc)
 	rt_flags := make([dynamic]string, context.temp_allocator)
-	append(&rt_flags, ..arch_flags())
-	append(&rt_flags, ..runtime_option_flags())
+	append(&rt_flags, ..spec_arch_flags(spec))
+	append(&rt_flags, ..runtime_option_flags(spec))
 	// FFmpeg: the player's own build in the data dir's ffmpeg/ (LGPL: they may relink the game with a modified FFmpeg;
 	// the launcher never writes there), else the bundled one
-	ffdir := pjoin({src, "ffmpeg"}, context.temp_allocator)
-	if own := data_path("ffmpeg"); file_exists(pjoin({own, "lib", "libavcodec.a"}, context.temp_allocator)) {
+	ffdir := x != nil ? spec.ffdir : pjoin({src, "ffmpeg"}, context.temp_allocator)
+	if own := data_path("ffmpeg"); x == nil && file_exists(pjoin({own, "lib", "libavcodec.a"}, context.temp_allocator)) {
 		ffdir = own
 		logf(t, "FFmpeg: your own build in %s", own)
 	}
-	append(&rt_flags, "-I", inc, "-I", rt, "-I", pjoin({ffdir, "include"}, context.temp_allocator))
+	append(&rt_flags, "-I", inc, "-I", rt, "-I", pjoin({src, "ffmpeg", "include"}, context.temp_allocator)) // (the headers: the same for every target)
+	if own := data_path("ffmpeg"); x == nil && ffdir == own {append(&rt_flags, "-I", pjoin({own, "include"}, context.temp_allocator))}
 	append(&rt_flags, "-DXRC_VULKAN", "-I", pjoin({src, "vulkan", "include"}, context.temp_allocator))
-	when REFERENCE {append(&rt_flags, "-DXRC_REFERENCE")}
-	logf(t, "Options: %v", runtime_option_flags())
-	if settings.lto && !lto_on() {logf(t, "Link-Time Optimization is off for this build: Clang's needs LLVM's linker (ld.lld) beside it, and there is none.")}
+	if reference {append(&rt_flags, "-DXRC_REFERENCE")}
+	logf(t, "Options: %v", runtime_option_flags(spec))
+	if settings.lto && !lto_on(spec) {logf(t, "Link-Time Optimization is off for this build: Clang's needs LLVM's linker (ld.lld) beside it, and there is none.")}
 	if list, err := os.read_all_directory_by_path(pjoin({src, "gen", "src"}, context.temp_allocator), context.temp_allocator); err == nil {
 		for e in list {
 			if strings.has_suffix(e.name, ".c") {
@@ -108,7 +142,7 @@ build_task :: proc(t: ^Task) {
 	if list, err := os.read_all_directory_by_path(rt, context.temp_allocator); err == nil {
 		for e in list {
 			if !strings.has_suffix(e.name, ".c") {continue}
-			if strings.has_prefix(e.name, "ref_") && !REFERENCE {continue}
+			if strings.has_prefix(e.name, "ref_") && !reference {continue}
 			append(&units, Unit{e.fullpath, pjoin({obj, strings.concatenate({"rt_", e.name[:len(e.name) - 2], ".o"}, context.temp_allocator)}, context.temp_allocator), rt_flags[:]})
 		}
 	}
@@ -117,8 +151,8 @@ build_task :: proc(t: ^Task) {
 	// the compiler and flags of the objects there, per kind (the pages / the runtime): different ones rebuild that
 	// kind (an option such as Audio rebuilds only the runtime; another compiler, everything)
 	pgo_t := pgo_profile != "" ? mtime(pgo_profile) : time.Time{} // (a new profile: everything again)
-	page_stamp := fmt.tprintf("%s|%v|%v|%v", cc, page_flags[:], REFERENCE, pgo_t)
-	rt_stamp := fmt.tprintf("%s|%v|%v|%v", cc, rt_flags[:], REFERENCE, pgo_t)
+	page_stamp := fmt.tprintf("%s|%v|%v|%v", cc, page_flags[:], reference, pgo_t)
+	rt_stamp := fmt.tprintf("%s|%v|%v|%v", cc, rt_flags[:], reference, pgo_t)
 	page_stamp_file := pjoin({obj, "pages.stamp"}, context.temp_allocator)
 	rt_stamp_file := pjoin({obj, "runtime.stamp"}, context.temp_allocator)
 	old_page, _ := os.read_entire_file(page_stamp_file, context.temp_allocator)
@@ -199,8 +233,9 @@ build_task :: proc(t: ^Task) {
 
 	// 4. link (the objects through a response file: the command line of 230 paths is long on Windows)
 	set_status(t, 0.92, "Linking")
-	gdir := game_out_dir()
-	out_exe := pjoin({gdir, strings.concatenate({GAME_NAME, EXE_SUFFIX}, context.temp_allocator)}, context.temp_allocator)
+	gdir := x != nil ? spec.out_dir : game_out_dir()
+	_ = os.make_directory_all(gdir)
+	out_exe := pjoin({gdir, strings.concatenate({GAME_NAME, x != nil ? "" : EXE_SUFFIX}, context.temp_allocator)}, context.temp_allocator)
 	rsp := strings.builder_make(context.temp_allocator)
 	for u in units {
 		p, _ := strings.replace_all(u.obj, "\\", "/", context.temp_allocator)
@@ -210,22 +245,32 @@ build_task :: proc(t: ^Task) {
 	_ = os.write_entire_file(rsp_file, rsp.buf[:])
 	args := make([dynamic]string, context.temp_allocator)
 	append(&args, cc)
-	append(&args, ..arch_flags())
-	append(&args, ..link_option_flags())
+	append(&args, ..spec_arch_flags(spec))
+	append(&args, ..link_option_flags(spec))
 	append(&args, "-o", out_exe, strings.concatenate({"@", rsp_file}, context.temp_allocator))
 	// FFmpeg (static, in dependency order), then what it needs of the system
 	for l in ([]string{"libavformat.a", "libavcodec.a", "libswresample.a", "libavutil.a"}) {
 		append(&args, pjoin({ffdir, "lib", l}, context.temp_allocator))
 	}
-	append(&args, ..FFMPEG_SYS_LIBS)
-	append(&args, ..link_libs())
+	if x != nil {
+		append(&args, ..CROSS_LINUX_SYS_LIBS)
+	} else {
+		append(&args, ..FFMPEG_SYS_LIBS)
+		append(&args, ..link_libs())
+	}
 	// Debug & Profile Tools OFF: nothing is printed (xrc_quiet.h), so no console window either (a GUI program; its
 	// entry point stays main)
-	when ODIN_OS == .Windows {if !settings.tools {append(&args, "-Wl,--subsystem,windows")}}
+	when ODIN_OS == .Windows {if !settings.tools && x == nil {append(&args, "-Wl,--subsystem,windows")}}
 	if code, started := run(t, args[:]); !started || code != 0 {
 		log_line(t, "Linking failed.")
-		when ODIN_OS == .Windows {logf(t, "(If WhiteRecomp is running, close it and Build again: Windows cannot replace a running program.)")}
+		when ODIN_OS == .Windows {if x == nil {logf(t, "(If WhiteRecomp is running, close it and Build again: Windows cannot replace a running program.)")}}
 		t.failed = true
+		return
+	}
+	if x != nil { 	// (a cross build: its own .cfg and README.txt; nothing of this computer's)
+		if !cross_write_extras(x, gdir) {logf(t, "Cannot write the settings in %s.", gdir); t.failed = true; return}
+		logf(t, "Built %s: copy the folder %s to the %s computer (its README.txt says how).", out_exe, gdir, x.name)
+		set_status(t, 1, "Built")
 		return
 	}
 	// the movie converter the game runs in the background for movies without their MP4 (Windows: tools/bink2mp4.exe)
@@ -243,17 +288,21 @@ build_task :: proc(t: ^Task) {
 // Profile-Guided Optimization (options.odin): pgo_profile set when this Build can use the profile -- the option on,
 // Clang (with lld on Windows), and the compiler reading it (a small file compiled with it first)
 @(private = "file")
-pgo_prepare :: proc(t: ^Task, cc, profile: string) {
+pgo_prepare :: proc(t: ^Task, cc, profile: string, spec: Build_Spec = {}) {
 	pgo_profile = ""
 	if !settings.pgo {return}
-	if why := pgo_blocked(); why != "" {logf(t, "Profile-Guided Optimization is off for this build: %s.", why); return}
+	if why := pgo_blocked(spec); why != "" {logf(t, "Profile-Guided Optimization is off for this build: %s.", why); return}
 	if !file_exists(profile) {logf(t, "Profile-Guided Optimization is off for this build: no profile in the bundle."); return}
 	obj := data_path("obj")
 	_ = os.make_directory_all(obj)
 	probe := pjoin({obj, "pgo_probe.c"}, context.temp_allocator)
 	_ = os.write_entire_file(probe, transmute([]u8)string("int pgo_probe(int x) { return x + 1; }\n"))
 	out := strings.builder_make(context.temp_allocator)
-	args := []string{cc, fmt.tprintf("-fprofile-instr-use=%s", profile), "-c", probe, "-o", pjoin({obj, "pgo_probe.o"}, context.temp_allocator)}
+	pa := make([dynamic]string, context.temp_allocator)
+	append(&pa, cc)
+	append(&pa, ..spec_arch_flags(spec))
+	append(&pa, fmt.tprintf("-fprofile-instr-use=%s", profile), "-c", probe, "-o", pjoin({obj, "pgo_probe.o"}, context.temp_allocator))
+	args := pa[:]
 	if code, started := run(t, args, mode = .Quiet, capture = &out); !started || code != 0 {
 		logf(t, "Profile-Guided Optimization is off for this build: this Clang cannot read the profile (an older version?).")
 		return
@@ -275,6 +324,16 @@ game_out_dir :: proc() -> string {
 // (src/runtime/xrc_rt.c load_cfg): the player's install (its C:\FINAL FANTASY XIII), its exe, the saves (the launcher's
 // cdrive), the movie converter and the ffmpeg it runs for the movies without their MP4 (host_movie_convert.c), and the
 // game's own arguments (Shadow Resolution, Anti-Aliasing: XRC_GAME_ARGS)
+// the .cfg lines of the game's own options (every build's)
+cfg_game_lines :: proc(b: ^strings.Builder) {
+	fmt.sbprintf(b, "XRC_GAME_ARGS=%s\n", game_args())
+	if settings.shadow_res == 0 {fmt.sbprintf(b, "XRC_NO_SHADOWS=1\n")}
+	if settings.memory_2gb {fmt.sbprintf(b, "XRC_GUEST_2GB=1\n")}
+	if settings.aa_fxaa && settings.aa_quality > 1 {fmt.sbprintf(b, "XRC_FXAA=%d\n", settings.aa_quality)}
+	if settings.convert_threads == 0 {fmt.sbprintf(b, "XRC_MOVIE_NO_CONVERT=1\n")}
+	fmt.sbprintf(b, "XRC_VK_PIPE_THREADS=%d\n", pipe_threads())
+}
+
 write_cfg :: proc(gdir: string) -> bool {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "# WhiteRecomp's settings, written by the launcher's Build (the environment overrides them)\n")
@@ -285,9 +344,6 @@ write_cfg :: proc(gdir: string) -> bool {
 		fmt.sbprintf(&b, "XRC_MOVIE_CONVERTER=%s\n", data_path("tools", "bink2mp4.exe"))
 		if ff := dep_get(.FFmpeg); ff.can_encode && ff.path != "" {fmt.sbprintf(&b, "XRC_MOVIE_FFMPEG=%s\n", ff.path)}
 	}
-	fmt.sbprintf(&b, "XRC_GAME_ARGS=%s\n", game_args())
-	if settings.shadow_res == 0 {fmt.sbprintf(&b, "XRC_NO_SHADOWS=1\n")}
-	if settings.memory_2gb {fmt.sbprintf(&b, "XRC_GUEST_2GB=1\n")}
-	if settings.aa_fxaa && settings.aa_quality > 1 {fmt.sbprintf(&b, "XRC_FXAA=%d\n", settings.aa_quality)}
+	cfg_game_lines(&b)
 	return os.write_entire_file(pjoin({gdir, GAME_NAME + ".cfg"}, context.temp_allocator), b.buf[:]) == nil
 }

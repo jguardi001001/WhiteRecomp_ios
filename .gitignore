@@ -7,6 +7,7 @@
 # the launchers: on GitHub Releases (launcher/publish.sh release)
 /WhiteRecompLauncher_windows.exe
 /WhiteRecompLauncher_linux
+/WhiteRecompLauncher_linux_arm64
 # made by build.sh, embedded in the launchers
 bundle.bin
 *.o

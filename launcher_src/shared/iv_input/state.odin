@@ -269,7 +269,9 @@ next_state :: proc "contextless" (old: State, down: bool) -> State {
 	case down:
 		return {.Down}
 	case was:
-		return {.Released}
+		// (pressed and released between two frames -- a quick click while the program draws few frames: the press
+		// is kept, or the frame never sees it)
+		return .Pressed in old ? {.Pressed, .Released} : {.Released}
 	}
 	return {}
 }

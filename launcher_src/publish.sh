@@ -8,8 +8,9 @@
 #   launcher_src/                          the launcher's sources: launcher/ (without its bundle.bin) and shared/ (the
 #                                          iv_* libraries) as launcher_src/shared/
 # The launchers themselves are not in the repo but on its GitHub Releases: `release TAG` makes release TAG at the
-# commit pushed last (origin/main: commit and push first) and uploads build/WhiteRecompLauncher_windows.exe and
-# build/WhiteRecompLauncher_linux to it, signed in through Windows Git's credential manager (ps4star).
+# commit pushed last (origin/main: commit and push first) and uploads build/WhiteRecompLauncher_windows.exe,
+# build/WhiteRecompLauncher_linux and build/WhiteRecompLauncher_linux_arm64 (launcher/build.sh linux_arm64) to it,
+# signed in through Windows Git's credential manager (ps4star).
 # Each launcher builds the game beside itself (WhiteRecomp(.exe) and WhiteRecomp.cfg: the repo's .gitignore).
 # The sources step does not commit: git status / git commit in the repo.
 set -eu
@@ -19,8 +20,8 @@ WINGIT="/mnt/c/Program Files/Git/cmd/git.exe"
 if [ "${1:-}" = release ]; then
 	TAG=${2:?usage: launcher/publish.sh release TAG [REPO]}
 	REPO=${3:-/mnt/c/Users/psivstar/Documents/proj/WhiteRecomp}
-	for f in build/WhiteRecompLauncher_windows.exe build/WhiteRecompLauncher_linux; do
-		[ -f "$f" ] || { echo "publish: $f is missing (launcher/build.sh all)"; exit 1; }
+	for f in build/WhiteRecompLauncher_windows.exe build/WhiteRecompLauncher_linux build/WhiteRecompLauncher_linux_arm64; do
+		[ -f "$f" ] || { echo "publish: $f is missing (launcher/build.sh all, launcher/build.sh linux_arm64)"; exit 1; }
 	done
 	TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | "$WINGIT" credential fill | sed -n 's/^password=//p')
 	[ -n "$TOKEN" ] || { echo "publish: not signed in to GitHub"; exit 1; }
@@ -41,11 +42,11 @@ if [ "${1:-}" = release ]; then
 	OUT=$(mktemp)
 	CODE=$(curl -s -o "$OUT" -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
 		"https://api.github.com/repos/$GH_REPO/releases" \
-		-d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"$SHA\",\"name\":\"WhiteRecomp $TAG\",\"body\":\"Download the launcher for your system: WhiteRecompLauncher_windows.exe (Windows) or WhiteRecompLauncher_linux (Linux x86-64; chmod +x it). Put it in a folder of its own: Build makes the game beside it. See README.md.\"}")
+		-d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"$SHA\",\"name\":\"WhiteRecomp $TAG\",\"body\":\"Download the launcher for your system: WhiteRecompLauncher_windows.exe (Windows) or WhiteRecompLauncher_linux (Linux x86-64) or WhiteRecompLauncher_linux_arm64 (Linux ARM64; chmod +x either). Put it in a folder of its own: Build makes the game beside it. See README.md.\"}")
 	[ "$CODE" = 201 ] || { echo "publish: creating release $TAG failed ($CODE):"; cat "$OUT"; rm -f "$OUT"; exit 1; }
 	ID=$(sed -n 's/^  "id": \([0-9]*\),$/\1/p' "$OUT" | head -1)
 	rm -f "$OUT"
-	for f in build/WhiteRecompLauncher_windows.exe build/WhiteRecompLauncher_linux; do
+	for f in build/WhiteRecompLauncher_windows.exe build/WhiteRecompLauncher_linux build/WhiteRecompLauncher_linux_arm64; do
 		n=$(basename "$f")
 		CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/octet-stream" \
 			--data-binary "@$f" "https://uploads.github.com/repos/$GH_REPO/releases/$ID/assets?name=$n")
@@ -72,6 +73,7 @@ carries -- its `bundle.bin`: the translated game code, the runtime, FFmpeg's lib
 converter -- comes from that project's build:
 
     sh launcher/build.sh all      # build/WhiteRecompLauncher_windows.exe and build/WhiteRecompLauncher_linux
+    sh launcher/build.sh linux_arm64   # build/WhiteRecompLauncher_linux_arm64
     sh launcher/publish.sh        # copies these sources into this repo
     sh launcher/publish.sh release vX.Y.Z   # (after committing and pushing) uploads the launchers to a GitHub release
 
@@ -88,6 +90,7 @@ cat > "$REPO/.gitignore" <<'GI'
 # the launchers: on GitHub Releases (launcher/publish.sh release)
 /WhiteRecompLauncher_windows.exe
 /WhiteRecompLauncher_linux
+/WhiteRecompLauncher_linux_arm64
 # made by build.sh, embedded in the launchers
 bundle.bin
 *.o
@@ -95,6 +98,7 @@ GI
 cat > "$REPO/.gitattributes" <<'GA'
 *.exe binary
 /WhiteRecompLauncher_linux binary
+/WhiteRecompLauncher_linux_arm64 binary
 *.ttf binary
 *.sh text eol=lf
 *.odin text eol=lf

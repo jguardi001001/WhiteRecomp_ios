@@ -14,7 +14,12 @@
 //                             for now (the cutscene after the first fight never plays)
 //   Cutscenes                 Auto-skip: -DXRC_SKIP_MOVIES (every movie skipped; the background conversion goes on)
 //   Cutscene Convert Threads  -DXRC_MOVIE_THREADS=N: the CPUs and encoder threads of the background conversion;
-//                             Convert Movies (movies.odin) runs the converter with as many (--threads N)
+//                             Convert Movies (movies.odin) runs the converter with as many (--threads N). Off: no
+//                             background conversion (XRC_MOVIE_NO_CONVERT=1 in WhiteRecomp.cfg, no Build needed);
+//                             Convert Movies then uses 1
+//   Pipeline Build Threads    XRC_VK_PIPE_THREADS=N in WhiteRecomp.cfg (no Build needed): the threads that make the
+//                             renderer's pipelines in the background (vk_d3d9.c pj_threads); the default (Best) half
+//                             the CPU threads, at most 8
 //   Graphics                  a preset of the three below (FXAA always): Ultrafast (no shadows, no anti-aliasing), Fast
 //                             (512 shadows, 2x FXAA), Fancy (the default: 1024, 4x FXAA), Ultrafancy (8192, 8x
 //                             FXAA); or Custom, which shows the three (indented) and keeps them as set
@@ -57,20 +62,48 @@ FPS_CHOICES :: [2]int{30, 60}
 // the highest Cutscene Convert Threads: the cores less one (the game's own)
 max_convert_threads :: proc() -> int {return max(1, os.get_processor_core_count() - 1)}
 
+// the CPUs a conversion uses (Off: Convert Movies still runs, with 1)
+convert_threads :: proc() -> int {return clamp(settings.convert_threads, 1, max_convert_threads())}
+
+// Pipeline Build Threads: the most (all the CPU threads but one, at most 16), the best (half of them, at most 8:
+// the rest for the game's own threads and the movie conversion), and the one the settings ask for (0: the best)
+max_pipe_threads :: proc() -> int {return clamp(os.get_processor_core_count() - 1, 1, 16)}
+best_pipe_threads :: proc() -> int {return clamp(os.get_processor_core_count() / 2, 1, 8)}
+pipe_threads :: proc() -> int {return settings.pipe_threads == 0 ? best_pipe_threads() : clamp(settings.pipe_threads, 1, max_pipe_threads())}
+
 // the flags of every unit (pages and runtime): the host CPU, fast math, LTO, no Linux hardening
-common_flags :: proc() -> []string {
+// (a cross build, cross.odin: the chosen CPU, and the target's no-hardening flags: ARM64 Linux has branch protection, not CET)
+common_flags :: proc(spec: Build_Spec = {}) -> []string {
 	f := make([dynamic]string, context.temp_allocator)
-	when ODIN_ARCH == .amd64 {append(&f, "-march=native")} else {append(&f, "-mcpu=native")}
+	if spec.cross != nil {
+		append(&f, fmt.tprintf("-mcpu=%s", spec.cpu))
+	} else {
+		when ODIN_ARCH == .amd64 {append(&f, "-march=native")} else {append(&f, "-mcpu=native")}
+	}
 	append(&f, "-ffast-math", "-fno-associative-math") // (reassociation folds the game's own rounding tricks: a broken title menu)
-	when ODIN_OS == .Linux {append(&f, "-fno-pie", "-fcf-protection=none", "-fno-stack-protector")}
-	if lto_on() {append(&f, lto_flag())}
+	// (x86: no reciprocal estimates -- fast math would compute every packed divide as rcpps and a Newton step, a few
+	// ulp off and the CPU's own, x / 0 a NaN; tools/xrc_build.sh)
+	if spec.cross == nil && ODIN_ARCH == .amd64 {append(&f, "-mrecip=none")}
+	if spec.cross != nil {
+		append(&f, "-fno-pie", "-mbranch-protection=none", "-fno-stack-protector")
+	} else {
+		when ODIN_OS == .Linux {
+			when ODIN_ARCH == .amd64 {append(&f, "-fno-pie", "-fcf-protection=none", "-fno-stack-protector")} else {append(&f, "-fno-pie", "-mbranch-protection=none", "-fno-stack-protector")}
+		}
+	}
+	if lto_on(spec) {append(&f, lto_flag(spec))}
 	if pgo_profile != "" {append(&f, fmt.tprintf("-fprofile-instr-use=%s", pgo_profile))}
 	return f[:]
 }
 
 // the link's own: LTO (the optimization happens there), no PIE on Linux
-link_option_flags :: proc() -> []string {
+link_option_flags :: proc(spec: Build_Spec = {}) -> []string {
 	f := make([dynamic]string, context.temp_allocator)
+	if spec.cross != nil { 	// (always LLVM's linker: it links ELF on any computer)
+		append(&f, "-no-pie", "-fuse-ld=lld", fmt.tprintf("--ld-path=%s", spec.lld))
+		if lto_on(spec) {append(&f, lto_flag(spec), fmt.tprintf("-O%d", clamp(settings.opt_level, 0, 3)))}
+		return f[:]
+	}
 	when ODIN_OS == .Linux {append(&f, "-no-pie")}
 	if lto_on() {
 		append(&f, lto_flag(), fmt.tprintf("-O%d", clamp(settings.opt_level, 0, 3)))
@@ -85,25 +118,30 @@ link_option_flags :: proc() -> []string {
 pgo_profile: string
 
 // why Profile-Guided Optimization cannot be on with these settings ("": it can)
-pgo_blocked :: proc() -> string {
+pgo_blocked :: proc(spec: Build_Spec = {}) -> string {
+	if spec.cross != nil {return ""} // (Clang and lld)
 	if !compiler_is_clang() {return "Needs Clang (GCC cannot read the profile)"}
 	when ODIN_OS == .Windows {if lld_path() == "" {return "Needs LLVM's linker (lld) beside Clang: not found"}}
 	return ""
 }
 
-lto_flag :: proc() -> string {return compiler_is_clang() ? "-flto=thin" : "-flto=auto"}
+lto_flag :: proc(spec: Build_Spec = {}) -> string {return spec.cross != nil || compiler_is_clang() ? "-flto=thin" : "-flto=auto"}
 
 // Link-Time Optimization on and possible: on Windows Clang's needs LLVM's linker (lld) beside it (MinGW's GNU ld
 // cannot read its objects); on Linux GNU ld reads them through LLVM's plugin
-lto_on :: proc() -> bool {
+lto_on :: proc(spec: Build_Spec = {}) -> bool {
 	if !settings.lto {return false}
+	if spec.cross != nil {return true}
 	when ODIN_OS != .Windows {return true}
 	if !compiler_is_clang() {return true}
 	return lld_path() != ""
 }
 
-lld_path :: proc() -> string {
-	dir := filepath.dir(settings.compiler)
+lld_path :: proc() -> string {return lld_beside(settings.compiler)}
+
+// LLVM's linker in a compiler's folder ("": none)
+lld_beside :: proc(cc: string) -> string {
+	dir := filepath.dir(cc)
 	for n in ([]string{"ld.lld.exe", "ld.lld"}) {
 		if p := pjoin({dir, n}, context.temp_allocator); file_exists(p) {return p}
 	}
@@ -111,31 +149,37 @@ lld_path :: proc() -> string {
 }
 
 // the flags of the translated pages (gen/src, gen/match)
-page_option_flags :: proc() -> []string {
+page_option_flags :: proc(spec: Build_Spec = {}) -> []string {
 	f := make([dynamic]string, context.temp_allocator)
 	append(&f, fmt.tprintf("-O%d", clamp(settings.opt_level, 0, 3)))
-	append(&f, ..common_flags())
+	append(&f, ..common_flags(spec))
 	append(&f, "-w", "-fno-strict-aliasing", "-fwrapv")
-	if compiler_is_clang() {append(&f, "-fno-addrsig")}
+	if spec.cross != nil || compiler_is_clang() {append(&f, "-fno-addrsig")}
 	return f[:]
 }
 
 // the flags of the runtime (and xrc_table.c): the options as defines
-runtime_option_flags :: proc() -> []string {
+runtime_option_flags :: proc(spec: Build_Spec = {}) -> []string {
 	f := make([dynamic]string, context.temp_allocator)
 	append(&f, fmt.tprintf("-O%d", clamp(settings.opt_level, 0, 3)), "-w")
-	append(&f, ..common_flags())
-	if compiler_is_clang() {append(&f, "-fno-addrsig")}
+	append(&f, ..common_flags(spec))
+	if spec.cross != nil || compiler_is_clang() {append(&f, "-fno-addrsig")}
 	append(&f, fmt.tprintf("-DXRC_FRAME_LIMIT=%d", settings.fps == 30 ? 30 : 60))
 	if !settings.audio {append(&f, "-DXRC_NO_AUDIO")}
 	if !settings.tools {append(&f, "-DXRC_NO_TOOLS")}
-	if !settings.vulkan && ODIN_OS == .Windows {append(&f, "-DXRC_D3D9_DEFAULT")}
+	if !settings.vulkan && ODIN_OS == .Windows && spec.cross == nil {append(&f, "-DXRC_D3D9_DEFAULT")}
 	if settings.skip_movies {append(&f, "-DXRC_SKIP_MOVIES")}
 	if settings.experimental {append(&f, "-DXRC_EXPERIMENTAL")}
-	append(&f, fmt.tprintf("-DXRC_MOVIE_THREADS=%d", clamp(settings.convert_threads, 1, max_convert_threads())))
+	append(&f, fmt.tprintf("-DXRC_MOVIE_THREADS=%d", convert_threads()))
 	return f[:]
 }
 
+// Resolution: the game's own -Width= / -Height= (what it renders at: its back buffer and full-screen targets; the
+// window is resizable and the picture scaled to fit it). 1280x720 (RES_DEFAULT) passes neither, as before; 854x480 and
+// 960x540 below it for slow GPUs. 16:9 only: the game's screens are laid out for it.
+Resolution :: struct {w, h: int}
+RESOLUTIONS :: [8]Resolution{{854, 480}, {960, 540}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}, {3200, 1800}, {3840, 2160}}
+RES_DEFAULT :: 2 // (1280x720)
 SHADOW_CHOICES :: [6]int{0, 512, 1024, 2048, 4096, 8192} // (8192: the most the retail launcher offers)
 AA_QUALITIES :: [4]int{1, 2, 4, 8}
 
@@ -178,7 +222,11 @@ graphics_matching :: proc() -> int {
 // the game's arguments for the options (XRC_GAME_ARGS)
 game_args :: proc() -> string {
 	msaa := settings.aa_fxaa || settings.aa_quality <= 1 ? 0 : settings.aa_quality
-	return fmt.tprintf("-Shadow=%d -MSAA=%d", settings.shadow_res == 0 ? 512 : settings.shadow_res, msaa)
+	args := fmt.tprintf("-Shadow=%d -MSAA=%d", settings.shadow_res == 0 ? 512 : settings.shadow_res, msaa)
+	res := RESOLUTIONS
+	r := res[clamp(settings.resolution, 0, len(res) - 1)]
+	if r.w != 1280 || r.h != 720 {args = fmt.tprintf("%s -Width=%d -Height=%d", args, r.w, r.h)}
+	return args
 }
 
 compiler_is_clang :: proc() -> bool {

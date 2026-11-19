@@ -13,6 +13,7 @@ Get the launcher for your system from the [Releases page](https://github.com/ps4
 | --- | --- |
 | Windows (64-bit) | `WhiteRecompLauncher_windows.exe` |
 | Linux (x86-64) | `WhiteRecompLauncher_linux` (run `chmod +x` on it first; less tested than Windows) |
+| Linux (ARM64) | `WhiteRecompLauncher_linux_arm64` (run `chmod +x` on it first; new and least tested: it builds and runs the game on the ARM64 computer itself, which needs Clang or GCC, Vulkan drivers and SDL2) |
 
 Put the launcher in a folder of its own. **Build** creates the game beside it.
 
@@ -95,6 +96,18 @@ FINAL FANTASY XIII's cutscenes are Bink 2 videos, which the port can't play dire
 
 How many CPU threads movie conversion uses, both for **Convert Movies** and for background conversion while you play. The default is **1**, so conversion doesn't slow the game down. Raise it to make **Convert Movies** finish sooner. The maximum is your CPU count minus one.
 
+**Off** stops the background conversion while you play (no Build needed). **Convert Movies** still works, with 1 thread.
+
+### Pipeline Build Threads
+
+How many threads prepare the renderer's graphics pipelines in the background. A new effect or area needs new pipelines the first time it appears, and until one is ready the objects using it are skipped for a frame or two. The default, marked **(Best)**, is half your CPU threads (at most 8). The maximum is your CPU threads minus one (at most 16). Takes effect the next time the game starts, with no Build needed.
+
+### Resolution
+
+The resolution the game renders at, passed to the game as `-Width=W -Height=H`: 854 x 480, 960 x 540, **1280 x 720** (default), 1600 x 900, 1920 x 1080, 2560 x 1440, 3200 x 1800 or 3840 x 2160. Higher is sharper and costs more GPU time; 480 and 540 are for slow GPUs. Takes effect the next time the game starts, with no Build needed.
+
+The game's window opens at this size. You can resize or maximize it, and **F11** switches fullscreen on and off. The picture is scaled to fit the window with its shape kept, so a window of another shape gets black bars.
+
 ### Graphics
 
 A preset for shadows and anti-aliasing. Takes effect the next time the game starts.
@@ -151,12 +164,22 @@ Every Build also uses these, with no option to turn them off:
 
 Turn it off again (and Build) if anything goes wrong. Bug reports from playing with it on are welcome; please say it was on.
 
+## Cross-Compile
+
+The **Cross-Compile** tab builds the game for another kind of computer than the one the launcher runs on, with the Options tab's options. Today that's **Linux ARM64**: a Raspberry Pi 4 or 5, an ARM laptop, Asahi Linux on an Apple-silicon Mac. It works from the Windows and the Linux launcher.
+
+- **Target:** Linux ARM64 (64-bit ARM, glibc 2.34 or newer: Debian 12, Ubuntu 22.04, Raspberry Pi OS 12 and later).
+- **CPU:** **Any ARM64 CPU** (default) runs everywhere; choosing the device's CPU (Raspberry Pi 4, Raspberry Pi 5, Apple M1/M2, ...) is faster there, but that build needs that CPU or a newer one.
+- **Needs:** Clang and LLVM's linker (lld). LLVM-MinGW and MSYS2's Clang on Windows come with lld; on Linux install it, e.g. `sudo apt install lld`. Everything for the target (its system headers and libraries, its FFmpeg) is packed in the launcher.
+- **Build for Linux ARM64** builds into the folder `WhiteRecomp-linux-arm64` beside the launcher. Copy that folder to the ARM64 computer, put (or link) your `FINAL FANTASY XIII` folder inside it, and run `./WhiteRecomp` there. Its `README.txt` has the steps. That computer needs Vulkan drivers and SDL2 (e.g. `sudo apt install libsdl2-2.0-0 mesa-vulkan-drivers`). Convert the cutscenes on a Windows PC first: they travel with the game folder.
+
 ## What the download contains
 
 - **The launcher program.** Packed inside it are:
   - **The translated game code:** C source files generated from the game program and compiled on your computer.
   - **The runtime those sources run on:** C sources for memory, threads, files, graphics (Vulkan), sound and movies.
   - **FFmpeg's libraries** (libavformat, libavcodec, libswresample, libavutil; LGPL 2.1 or later), which the game is linked with to play the movies.
+  - **For the Cross-Compile tab:** Linux ARM64's system headers and libraries (from Ubuntu's packages) and FFmpeg's libraries for Linux ARM64.
   - **On Windows, the movie converter:** a 32-bit Windows program.
   - **On Windows, the FFmpeg program it encodes with** (`ffmpeg.exe`, GPL 3). It's a separate program; see `THIRD_PARTY_LICENSES.txt`.
 - **`THIRD_PARTY_LICENSES.txt`:** the licenses of the libraries and fonts in the launcher, and of FFmpeg, with where to get its source and how to use your own build of it.
