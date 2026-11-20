@@ -15,7 +15,7 @@ Get the launcher for your system from the [Releases page](https://github.com/ps4
 | --- | --- |
 | Windows (64-bit) | `WhiteRecompLauncher_windows.exe` |
 | Linux (x86-64) | `WhiteRecompLauncher_linux` (run `chmod +x` on it first; less tested than Windows) |
-| Linux (ARM64) | `WhiteRecompLauncher_linux_arm64` (run `chmod +x` on it first; new and least tested: it builds and runs the game on the ARM64 computer itself, which needs Clang or GCC, Vulkan drivers and SDL2) |
+| Linux (ARM64) | `WhiteRecompLauncher_linux_arm64` (run `chmod +x` on it first; new and least tested: it builds and runs the game on the ARM64 computer itself, which needs Clang, Vulkan drivers and SDL2) |
 
 Put the launcher in a folder of its own. **Build** creates the game beside it.
 
@@ -32,21 +32,22 @@ Put the launcher in a folder of its own. **Build** creates the game beside it.
 ## Requirements
 
 - **FINAL FANTASY XIII from Steam.** WhiteRecomp reads the game program (`ffxiiiimg.exe`, which must be the current Steam version) and all the game's files from your install. It uses the game's own movie decoder (`bink2w32.dll`) once, to convert the movies.
-- **A C compiler.**
-  - On Windows: MSYS2's **Clang** (recommended) or GCC. Visual C++ can't build the game.
-  - On Linux: `clang` or `gcc`.
-  - The launcher lists every compiler it finds and offers to install one if there is none.
+- **Clang** (the C compiler the game is built with; GCC isn't used).
+  - On Windows: LLVM-MinGW, or MSYS2's Clang. Visual C++ can't build the game.
+  - On Linux: `clang`.
+  - The launcher lists every Clang it finds and offers to install it if there is none.
 - **A GPU with Vulkan 1.3.**
 - **Movies:** converting them works on Windows only for now, and the launcher brings the FFmpeg program it needs. Playing converted movies needs no FFmpeg program, because the game has FFmpeg's libraries built in.
+- **Steam achievements and overlay (Windows, Linux):** have Steam running and signed in when you start the game. See [Steam Integration](#steam-integration).
 
 ## Options
 
 The **Options** tab is saved between sessions.
 
 - **Build options:** most options change how the game is compiled, so they take effect the next time you press **Build**.
-- **Game options:** **Resolution**, **Window Scaling**, **Graphics**, **Effects Resolution**, **Cutscene Convert Threads**, **Pipeline Build Threads** and **Memory** are passed to the game when it starts. They take effect the next time you start the game, with no rebuild.
+- **Game options:** **Resolution**, **Window Scaling**, **Graphics**, **Effects Resolution**, **Cutscene Convert Threads**, **Steam Integration**, **Pipeline Build Threads** and **Memory** are passed to the game when it starts. They take effect the next time you start the game, with no rebuild.
 
-The options are grouped as on the tab: Display, Graphics, Audio & Controls, Cutscenes, Performance and Build.
+The options are grouped as on the tab: Display, Graphics, Audio & Controls, Cutscenes, Steam (Windows, Linux), Performance and Build.
 
 ### Display
 
@@ -127,6 +128,17 @@ How many CPU threads movie conversion uses, both for **Convert Movies** and for 
 
 **Off** stops the background conversion while you play (no Build needed). **Convert Movies** still works, with 1 thread.
 
+### Steam
+
+#### Steam Integration
+
+Windows and Linux (x86-64 PCs; not ARM64 builds).
+
+- **On** (default): with Steam running and signed in when the game starts, achievements unlock on your Steam account with Steam's pop-up in the game window, the Steam overlay works (**Shift+Tab**; Vulkan graphics driver), and Steam shows you as playing FINAL FANTASY XIII. On Linux the game uses your Steam installation's own `steamclient.so` (regular or Flatpak Steam); the overlay is less certain there than on Windows, but achievements don't depend on it. Without Steam running, the game plays normally without them; start Steam before the game, since a Steam started later isn't noticed.
+- **Off:** none of that. The game doesn't touch Steam at all.
+
+Takes effect the next time the game starts, with no Build needed. Steam Cloud saves aren't supported either way; saves stay on your computer.
+
 ### Performance
 
 #### Pipeline Build Threads
@@ -144,7 +156,7 @@ How much memory the game can address.
 
 #### Compiler
 
-The C compiler that builds the game. The launcher finds every GCC and Clang on the system and lists Clang first, marked **(Best)**. Clang produces a noticeably faster game, about 15% less CPU time per frame than GCC.
+The C compiler that builds the game: always Clang. The launcher lists every Clang it finds on the system; GCC isn't used (Clang produces a noticeably faster game, and every build is then made the same way).
 
 #### Optimization Level
 
@@ -164,7 +176,7 @@ Levels above 1 haven't measured faster than 1.
 - **On** (default): the game is compiled with a profile recorded while playing it, so the compiler optimizes for how the game actually runs: about 6% less CPU time per frame on the game's main thread.
 - **Off:** built without the profile.
 
-It needs **Clang**; with GCC it's skipped. On Windows it also needs LLVM's linker (`ld.lld.exe`) next to `clang.exe` (MSYS2: the `mingw-w64-ucrt-x86_64-lld` package); the launcher says so if it's missing. If your Clang is too old to read the profile, the Build says so and goes on without it.
+On Windows it also needs LLVM's linker (`ld.lld.exe`) next to `clang.exe` (MSYS2: the `mingw-w64-ucrt-x86_64-lld` package); the launcher says so if it's missing. If your Clang is too old to read the profile, the Build says so and goes on without it.
 
 #### Link-Time Optimization
 
@@ -182,7 +194,7 @@ Turn it off again (and Build) if anything goes wrong. Bug reports from playing w
 
 #### Debug & Profile Tools
 
-- **Off** (default): the game prints nothing and, on Windows, opens no console window.
+- **Off** (default): the game prints nothing and, on Windows, opens no console window. No Vulkan debugging, validation, capture or profiling layer is loaded either, even if your environment or an installed tool (RenderDoc, Nsight, the Vulkan SDK's layers) asks for one. Steam's overlay is still loaded when [Steam Integration](#steam-integration) is on, and other overlays and OBS game capture keep working.
 - **On:** a console window with logs, plus:
   - an **FPS counter** in the top right corner of the game window
   - stack traces if the game crashes or hangs
@@ -215,6 +227,7 @@ The **Cross-Compile** tab builds the game for another kind of computer than the 
   - **FFmpeg's libraries** (libavformat, libavcodec, libswresample, libavutil; LGPL 2.1 or later), which the game is linked with to play the movies.
   - **For the Cross-Compile tab:** Linux ARM64's system headers and libraries (from Ubuntu's packages) and FFmpeg's libraries for Linux ARM64.
   - **On Windows, the movie converter:** a 32-bit Windows program.
+  - **On Windows, the Steam achievements helper:** a small 32-bit Windows program that loads your install's own Steam files (`sgw.dll` and `steam_api.dll`), since the 64-bit game can't. Nothing of Valve's is included.
   - **On Windows, the FFmpeg program it encodes with** (`ffmpeg.exe`, GPL 3). It's a separate program; see `THIRD_PARTY_LICENSES.txt`.
 - **`THIRD_PARTY_LICENSES.txt`:** the licenses of the libraries and fonts in the launcher, and of FFmpeg, with where to get its source and how to use your own build of it.
 

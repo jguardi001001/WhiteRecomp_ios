@@ -1,6 +1,7 @@
 // What the launcher needs on the computer, how it finds each, and how it installs what is missing.
-//   C compiler  builds the game from the bundled sources: gcc or clang (on Windows a MinGW one: the runtime needs
-//               pthreads and the D3D9 import library; Visual C++ cannot build it yet). Probed by compiling and running a
+//   C compiler  builds the game from the bundled sources: clang only, on every system (on Windows a MinGW one, LLVM-MinGW
+//               or MSYS2's clang64: the runtime needs pthreads and the D3D9 import library; Visual C++ cannot build it
+//               yet). GCC is not taken: every build is the same compiler's, the one the game is tested with. Probed by compiling and running a
 //               small program, so a compiler that is there but cannot build this is not taken.
 //   FFmpeg      encodes the movies (Convert Movies: libx264 + aac). Playing them needs no FFmpeg program: the game
 //               links FFmpeg's libraries statically (third_party/ffmpeg, bundled)
@@ -122,7 +123,8 @@ when ODIN_OS == .Windows {
 	@(rodata) FFMPEG_SYS_LIBS := []string{"-l:libssl.so.3", "-l:libcrypto.so.3"}
 }
 when ODIN_OS == .Windows {
-	@(rodata) LINK_LIBS := []string{"-static", "-pthread", "-ld3d9", "-ldinput8", "-ldxguid", "-lole32", "-loleaut32", "-luuid", "-luser32", "-lgdi32", "-lwinmm", "-lm"}
+	// (--image-base: the exe above guest memory, which is at a fixed address from 0x7fff0000 to 0x17fff0000: src/include/xrc.h)
+	@(rodata) LINK_LIBS := []string{"-static", "-Wl,--image-base,0x200000000", "-pthread", "-ld3d9", "-ldinput8", "-ldxguid", "-lole32", "-loleaut32", "-luuid", "-luser32", "-lgdi32", "-lwinmm", "-lm"}
 } else {
 	@(rodata) LINK_LIBS := []string{"-pthread", "-lm", "-ldl"} // (-ldl: Vulkan and SDL2 are loaded at run time)
 }
@@ -136,7 +138,7 @@ compiler_candidates :: proc() -> [dynamic]string {
 	c := make([dynamic]string, context.temp_allocator)
 	add :: proc(c: ^[dynamic]string, p: string) {if p != "" {append(c, p)}}
 	when ODIN_OS == .Windows {
-		for n in ([]string{"x86_64-w64-mingw32-gcc", "gcc", "x86_64-w64-mingw32-clang", "clang", "cc"}) {add(&c, find_program(n))}
+		for n in ([]string{"x86_64-w64-mingw32-clang", "clang"}) {add(&c, find_program(n))}
 		// winget's llvm-mingw (not on this process's PATH right after it was installed)
 		la := os.get_env("LOCALAPPDATA", context.temp_allocator)
 		pk := pjoin({la, "Microsoft", "WinGet", "Packages"}, context.temp_allocator)
@@ -151,11 +153,11 @@ compiler_candidates :: proc() -> [dynamic]string {
 				}
 			}
 		}
-		for p in ([]string{`C:\msys64\ucrt64\bin\gcc.exe`, `C:\msys64\mingw64\bin\gcc.exe`, `C:\msys64\ucrt64\bin\clang.exe`, `C:\msys64\clang64\bin\clang.exe`}) {
+		for p in ([]string{`C:\msys64\ucrt64\bin\clang.exe`, `C:\msys64\clang64\bin\clang.exe`}) {
 			if file_exists(p) {append(&c, p)}
 		}
 	} else {
-		for n in ([]string{"cc", "gcc", "clang"}) {add(&c, find_program(n))}
+		for n in ([]string{"clang", "cc"}) {add(&c, find_program(n))} // (cc: macOS's is clang; a GCC one is left out below)
 	}
 	return c
 }
@@ -213,19 +215,14 @@ check_compiler :: proc(t: ^Task) -> Dep {
 		_, _, key_v := strings.partition(v, " ")
 		if key_v != "" && key_v in versions {continue}
 		versions[strings.clone(key_v, context.temp_allocator)] = true
+		if !strings.contains(v, "clang") {
+			append(&tried, fmt.tprintf("%s: GCC (the game is built with Clang only)", filepath.base(cc)))
+			continue
+		}
 		append(&found, Compiler{path = strings.clone(cc), clang = strings.contains(v, "clang")})
 	}
 	if len(found) > 0 {
-		slice.stable_sort_by(found[:], proc(a, b: Compiler) -> bool {return a.clang && !b.clang})
-		nclang, ngcc := 0, 0
-		for c in found {if c.clang {nclang += 1} else {ngcc += 1}}
-		first_clang := true
-		for &c in found {
-			name := c.clang ? "Clang" : "GCC"
-			if c.clang && first_clang {name = "Clang (Best)"; first_clang = false}
-			many := c.clang ? nclang > 1 : ngcc > 1
-			c.label = many ? fmt.aprintf("%s — %s", name, c.path) : strings.clone(name)
-		}
+		for &c in found {c.label = len(found) > 1 ? fmt.aprintf("Clang — %s", c.path) : strings.clone("Clang")}
 		sync.mutex_lock(&deps_mutex)
 		compilers = found
 		sync.mutex_unlock(&deps_mutex)
@@ -237,7 +234,7 @@ check_compiler :: proc(t: ^Task) -> Dep {
 	clear(&compilers)
 	sync.mutex_unlock(&deps_mutex)
 	when ODIN_OS == .Windows {
-		if find_program("cl") != "" {append(&tried, "Visual C++ (cl) is installed, but it cannot build the game yet (it needs gcc or clang)")}
+		if find_program("cl") != "" {append(&tried, "Visual C++ (cl) is installed, but it cannot build the game yet (it needs clang)")}
 	}
 	if len(tried) == 0 {
 		d.note = "none found"
@@ -256,7 +253,7 @@ check_compiler :: proc(t: ^Task) -> Dep {
 		pm, cmd := linux_install_cmd("compiler")
 		if pm != "" {
 			d.install = cmd
-			d.install_how = fmt.aprintf("Install gcc (%s)", pm)
+			d.install_how = fmt.aprintf("Install Clang (%s)", pm)
 			d.needs_admin = true
 		}
 	}
@@ -364,16 +361,17 @@ clone_cmd :: proc(cmd: []string) -> []string {
 @(private = "file")
 linux_install_cmd :: proc(what: string) -> (pm: string, cmd: []string) {
 	if p := find_program("apt-get"); p != "" {
-		return "apt", clone_cmd({p, "install", "-y", what == "compiler" ? "build-essential" : "ffmpeg"})
+		if what == "compiler" {return "apt", clone_cmd({p, "install", "-y", "clang", "libc6-dev"})}
+		return "apt", clone_cmd({p, "install", "-y", "ffmpeg"})
 	}
 	if p := find_program("dnf"); p != "" {
-		return "dnf", clone_cmd({p, "install", "-y", what == "compiler" ? "gcc" : "ffmpeg-free"})
+		return "dnf", clone_cmd({p, "install", "-y", what == "compiler" ? "clang" : "ffmpeg-free"})
 	}
 	if p := find_program("pacman"); p != "" {
-		return "pacman", clone_cmd({p, "-S", "--needed", "--noconfirm", what == "compiler" ? "gcc" : "ffmpeg"})
+		return "pacman", clone_cmd({p, "-S", "--needed", "--noconfirm", what == "compiler" ? "clang" : "ffmpeg"})
 	}
 	if p := find_program("zypper"); p != "" {
-		return "zypper", clone_cmd({p, "--non-interactive", "install", what == "compiler" ? "gcc" : "ffmpeg"})
+		return "zypper", clone_cmd({p, "--non-interactive", "install", what == "compiler" ? "clang" : "ffmpeg"})
 	}
 	return "", nil
 }

@@ -35,6 +35,10 @@
 //   Effects Resolution        Half (the default) or Full: the blended effects that add light (fire, sparks, magic)
 //                             drawn into a half-size image and added to the 3D image (vk_d3d9.c, Vulkan only); Full:
 //                             XRC_VK_HALF_FX=0 in WhiteRecomp.cfg, no Build needed
+//   Steam Integration         (Windows, Linux) On (the default) or Off: achievements (Windows: through
+//                             tools/steamhelper.exe; Linux x86-64: the player's own steamclient.so) and Steam's overlay,
+//                             while Steam runs (src/runtime/host_steam.c); Off: XRC_NO_STEAM=1 in
+//                             WhiteRecomp.cfg, no Build needed
 //   Memory                    4 GB (the default) or 2 GB: the guest address space the game runs in; 2 GB is what the
 //                             original exe gets (not large-address-aware): XRC_GUEST_2GB=1 in WhiteRecomp.cfg, no
 //                             Build needed (src/runtime/xrc_rt.h's layout)

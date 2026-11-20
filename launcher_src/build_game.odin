@@ -273,7 +273,8 @@ build_task :: proc(t: ^Task, spec: Build_Spec = {}) {
 		set_status(t, 1, "Built")
 		return
 	}
-	// the movie converter the game runs in the background for movies without their MP4 (Windows: tools/bink2mp4.exe)
+	// the movie converter the game runs in the background for movies without their MP4 (Windows: tools/bink2mp4.exe),
+	// and the Steam achievements helper (tools/steamhelper.exe)
 	when ODIN_OS == .Windows {_ = bundle_extract(t, data_dir, {"tools/"})}
 	if !write_cfg(gdir) {
 		logf(t, "Cannot write %s in %s.", GAME_NAME + ".cfg", gdir)
@@ -331,6 +332,7 @@ cfg_game_lines :: proc(b: ^strings.Builder) {
 	if settings.memory_2gb {fmt.sbprintf(b, "XRC_GUEST_2GB=1\n")}
 	if settings.stretch {fmt.sbprintf(b, "XRC_STRETCH=1\n")}
 	if settings.fx_full {fmt.sbprintf(b, "XRC_VK_HALF_FX=0\n")}
+	if settings.steam_off {fmt.sbprintf(b, "XRC_NO_STEAM=1\n")}
 	if settings.aa_fxaa && settings.aa_quality > 1 {fmt.sbprintf(b, "XRC_FXAA=%d\n", settings.aa_quality)}
 	if settings.convert_threads == 0 {fmt.sbprintf(b, "XRC_MOVIE_NO_CONVERT=1\n")}
 	fmt.sbprintf(b, "XRC_VK_PIPE_THREADS=%d\n", pipe_threads())
@@ -344,6 +346,7 @@ write_cfg :: proc(gdir: string) -> bool {
 	fmt.sbprintf(&b, "XRC_CDRIVE=%s\n", data_path("cdrive"))
 	when ODIN_OS == .Windows {
 		fmt.sbprintf(&b, "XRC_MOVIE_CONVERTER=%s\n", data_path("tools", "bink2mp4.exe"))
+		fmt.sbprintf(&b, "XRC_STEAM_HELPER=%s\n", data_path("tools", "steamhelper.exe"))
 		if ff := dep_get(.FFmpeg); ff.can_encode && ff.path != "" {fmt.sbprintf(&b, "XRC_MOVIE_FFMPEG=%s\n", ff.path)}
 	}
 	cfg_game_lines(&b)

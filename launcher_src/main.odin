@@ -588,6 +588,17 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 		if n, ch := dropdown(g, "threads", ctrl, names, sel, active = active); ch {settings.convert_threads = n; changed = true; game_changed = true}
 		note_text(g, sel == 0 ? "No converting while you play (Convert Movies uses 1)" : "CPU threads for converting (Convert Movies and in the background)", note, DIM)
 	}
+	// ---- Steam (host_steam.c -- Windows: the achievements helper; Linux x86-64: the player's steamclient.so; both: Steam's
+	// overlay)
+	when ODIN_OS == .Windows || ODIN_OS == .Linux {
+		section(g, oi, &row, "Steam")
+		// Steam Integration: achievements and the overlay (XRC_NO_STEAM=1 in its .cfg when off: no Build needed)
+		{
+			_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Steam Integration:")
+			if on, ch := toggle(g, ctrl, !settings.steam_off, active); ch {settings.steam_off = !on; changed = true; game_changed = true}
+			note_text(g, settings.steam_off ? "No achievements or overlay; Steam does not show the game as running" : "Achievements and the overlay (Shift+Tab) while Steam runs; no Build needed", note, DIM)
+		}
+	}
 	// ---- Performance
 	section(g, oi, &row, "Performance")
 	// Pipeline Build Threads (in its .cfg: no Build needed)
@@ -726,22 +737,20 @@ draw_no_compiler :: proc(g: ^Gui) {
 	in_ := ui.inset_xy(box, px(g, 24), px(g, 22))
 	ren.draw_text(g.dl, g.big, "A C compiler is needed", {in_.x, in_.y}, TEXT)
 	y := in_.y + g.big.line_height + px(g, 12)
-	y += paragraph(g, g.font, "The launcher builds the game on your computer, and that needs a C compiler (Clang or GCC). None was found. Install one, then press Check again.", {in_.x, y, in_.w, 0}, TEXT, px(g, 2))
+	y += paragraph(g, g.font, "The launcher builds the game on your computer, and that needs Clang (the game is built with Clang only: GCC is not used). None was found. Install one, then press Check again.", {in_.x, y, in_.w, 0}, TEXT, px(g, 2))
 	y += px(g, 12)
 	lh := g.font.line_height + px(g, 10)
 	when ODIN_OS == .Windows {
 		x := in_.x + px(g, 12)
 		ren.draw_text(g.dl, g.bold, "Windows", {in_.x, y}, TEXT); y += lh
-		w := link(g, x, y, "LLVM-MinGW (Clang: the best choice)", "https://github.com/mstorsjo/llvm-mingw/releases")
+		w := link(g, x, y, "LLVM-MinGW (Clang)", "https://github.com/mstorsjo/llvm-mingw/releases")
 		ren.draw_text(g.dl, g.small, "  the ucrt-x86_64 zip, or: winget install MartinStorsjo.LLVM-MinGW.UCRT", {x + w, y + px(g, 2)}, DIM); y += lh
-		link(g, x, y, "MSYS2 (GCC or Clang)", "https://www.msys2.org/"); y += lh
+		link(g, x, y, "MSYS2 (its clang64 Clang)", "https://www.msys2.org/"); y += lh
 	} else {
 		x := in_.x + px(g, 12)
 		ren.draw_text(g.dl, g.bold, "Linux", {in_.x, y}, TEXT); y += lh
-		w := link(g, x, y, "Clang (the best choice)", "https://clang.llvm.org/get_started.html")
+		w := link(g, x, y, "Clang", "https://clang.llvm.org/get_started.html")
 		ren.draw_text(g.dl, g.small, "  e.g. sudo apt install clang  /  sudo dnf install clang", {x + w, y + px(g, 2)}, DIM); y += lh
-		w = link(g, x, y, "GCC", "https://gcc.gnu.org/install/")
-		ren.draw_text(g.dl, g.small, "  e.g. sudo apt install build-essential", {x + w, y + px(g, 2)}, DIM); y += lh
 	}
 	btns := dialog_buttons(g, box)
 	d := dep_get(.Compiler)

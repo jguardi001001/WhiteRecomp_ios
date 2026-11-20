@@ -1,6 +1,7 @@
 // The sources the launcher carries: launcher/bundle.bin, made by `ff bundle` (tools/ff/bundle.odin has the format),
 // embedded at compile time. What is in it: the translated code (gen/src/page_*.c, gen/xrc_table.c), the runtime
-// (runtime/), its header (include/xrc.h) and the movie converter (tools/bink2mp4.exe; Windows: with the ffmpeg.exe it
+// (runtime/), its header (include/xrc.h), the Steam achievements helper (tools/steamhelper.exe) and the movie converter
+// (tools/bink2mp4.exe; Windows: with the ffmpeg.exe it
 // encodes with, tools/ffmpeg.exe, GPL: third_party/ffmpeg_exe). Nothing of the game itself:
 // its data comes from the player's own ffxiiiimg.exe and install.
 //

@@ -4,7 +4,7 @@
 //     src/     the bundled sources, unpacked by Build      obj/   their objects
 //     (the built game, WhiteRecomp / WhiteRecomp.exe with its WhiteRecomp.cfg, is beside the launcher: build_game.odin)
 //     cdrive/  the game's C: drive (its saves and settings: the install itself is mapped in, XRC_GAME_DIR)
-//     tools/   bundled tools (bink2mp4.exe)
+//     tools/   bundled tools (bink2mp4.exe, steamhelper.exe)
 //     ffmpeg/  (the player's, never written by the launcher) another FFmpeg build to link the game with: lib/ (libavformat.a,
 //              libavcodec.a, libswresample.a, libavutil.a) and include/; without it, the bundled one (src/ffmpeg)
 //     settings.txt
@@ -93,6 +93,7 @@ Settings :: struct {
 	stretch:         bool, // Window Scaling: Stretch -- the picture fills the window, proportions not kept (XRC_STRETCH=1 in the .cfg); else Fit
 	memory_2gb:      bool, // Memory: 2 GB, as the original exe gets (XRC_GUEST_2GB=1 in the .cfg); else 4 GB
 	fx_full:         bool, // Effects Resolution: Full (XRC_VK_HALF_FX=0 in the .cfg); else Half, the default (vk_d3d9.c)
+	steam_off:       bool, // Steam Integration: Off (XRC_NO_STEAM=1 in the .cfg); else On, the default (host_steam.c; Windows, Linux)
 	cross_target:    string, // the Cross-Compile tab's Target (cross.odin: a Cross_Target key; "": the first)
 	cross_cpu:       string, // its CPU (-mcpu=; "": the target's first, generic)
 }
@@ -161,6 +162,8 @@ load_settings :: proc() {
 			settings.stretch = v == "1"
 		case "fx_full":
 			settings.fx_full = v == "1"
+		case "steam_off":
+			settings.steam_off = v == "1"
 		case "cross_target":
 			settings.cross_target = strings.clone(v)
 		case "cross_cpu":
@@ -211,6 +214,7 @@ save_settings :: proc() {
 	fmt.sbprintf(&b, "memory_2gb %d\n", settings.memory_2gb ? 1 : 0)
 	fmt.sbprintf(&b, "stretch %d\n", settings.stretch ? 1 : 0)
 	fmt.sbprintf(&b, "fx_full %d\n", settings.fx_full ? 1 : 0)
+	fmt.sbprintf(&b, "steam_off %d\n", settings.steam_off ? 1 : 0)
 	fmt.sbprintf(&b, "cross_target %s\n", settings.cross_target)
 	fmt.sbprintf(&b, "cross_cpu %s\n", settings.cross_cpu)
 	_ = os.write_entire_file(data_path("settings.txt"), b.buf[:])
