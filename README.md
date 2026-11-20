@@ -18,7 +18,7 @@ Get the launcher for your system from the [Releases page](https://github.com/ps4
 | Windows (64-bit) | `WhiteRecompLauncher_windows.exe` |
 | Linux (x86-64) | `WhiteRecompLauncher_linux` (run `chmod +x` on it first; less tested than Windows; needs glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36, SteamOS 3 and later) |
 | Linux (ARM64) | `WhiteRecompLauncher_linux_arm64` (run `chmod +x` on it first; glibc 2.35 or newer, as above; new and least tested: it builds and runs the game on the ARM64 computer itself, which needs Clang, Vulkan drivers and SDL2) |
-| macOS 11 or newer (Apple silicon or Intel) | `ff13-launcher-macos.zip`: unzip it and open `WhiteRecomp.app`. **Experimental and untested so far**: see [macOS](#macos). |
+| macOS 11 or newer (Apple silicon or Intel) | `WhiteRecompLauncher_macos.zip`: unzip it and open `WhiteRecomp.app`. It isn't signed, so the first time right-click it and choose **Open** (or run `xattr -dr com.apple.quarantine WhiteRecomp.app`). **Experimental and untested so far**: see [macOS](#macos). |
 
 Put the launcher in a folder of its own. **Build** creates the game beside it.
 

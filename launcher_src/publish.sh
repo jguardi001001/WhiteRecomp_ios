@@ -2,6 +2,7 @@
 # launcher/publish.sh [REPO]               (WSL) the sources into the launcher's git repo
 # launcher/publish.sh release TAG [REPO]   (WSL; after launcher/build.sh all) a GitHub release of the launchers
 #                                          (REPLACE=1: every earlier release and its tag deleted first)
+# launcher/publish.sh macos TAG            (WSL) the macOS launcher again for release TAG (after a failed run)
 # The repo (default C:\Users\psivstar\Documents\proj\WhiteRecomp; on GitHub ps4star/WhiteRecomp) holds:
 #   README.md                              launcher/release/README.md (GitHub's page)
 #   THIRD_PARTY_LICENSES.txt               launcher/release/ (CRLF)
@@ -10,7 +11,10 @@
 # The launchers themselves are not in the repo but on its GitHub Releases: `release TAG` makes release TAG at the
 # commit pushed last (origin/main: commit and push first) and uploads build/WhiteRecompLauncher_windows.exe,
 # build/WhiteRecompLauncher_linux and build/WhiteRecompLauncher_linux_arm64 (launcher/build.sh linux_arm64) to it,
-# signed in through Windows Git's credential manager (ps4star).
+# signed in through Windows Git's credential manager (ps4star). With build/bundle_macos.bin (launcher/build.sh macos)
+# it also uploads that and starts the repo's "macOS launcher" workflow (.github/workflows/macos-launcher.yml, from
+# launcher/release/macos-launcher.yml): GitHub's Mac runner builds WhiteRecompLauncher_macos.zip, adds it to the
+# release and deletes bundle_macos.bin from it (a few minutes later: the repo's Actions tab).
 # Each launcher builds the game beside itself (WhiteRecomp(.exe) and WhiteRecomp.cfg: the repo's .gitignore).
 # The sources step does not commit: git status / git commit in the repo.
 set -eu
@@ -24,6 +28,33 @@ no_sources() {
 		grep -iE '\.(c|h|cc|cpp|hpp|inc)$|(^|/)bundle\.bin$|(^|/)page_[0-9a-f]+\.' || true)
 	[ -z "$bad" ] || { echo "publish: $1 has source files that must not be published:"; echo "$bad" | head -20; exit 1; }
 }
+gh_token() {
+	TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | "$WINGIT" credential fill | sed -n 's/^password=//p')
+	[ -n "$TOKEN" ] || { echo "publish: not signed in to GitHub"; exit 1; }
+}
+# macos_start TAG RELEASE_ID: build/bundle_macos.bin onto the release, and the macOS workflow started for it
+macos_start() {
+	[ -f build/bundle_macos.bin ] || { echo "publish: no build/bundle_macos.bin (launcher/build.sh macos): no macOS launcher"; return 0; }
+	# (one left on the release by an earlier, failed run: replaced)
+	A=$(curl -s -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/$GH_REPO/releases/$2/assets?per_page=100" |
+		tr -d '\n ' | grep -o '"url":"[^"]*/assets/[0-9]*","id":[0-9]*,"node_id":"[^"]*","name":"bundle_macos.bin"' | sed 's/^"url":"\([^"]*\)".*/\1/')
+	[ -z "$A" ] || curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $TOKEN" "$A"
+	CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/octet-stream" \
+		--data-binary @build/bundle_macos.bin "https://uploads.github.com/repos/$GH_REPO/releases/$2/assets?name=bundle_macos.bin")
+	[ "$CODE" = 201 ] || { echo "publish: uploading bundle_macos.bin failed ($CODE)"; exit 1; }
+	CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+		"https://api.github.com/repos/$GH_REPO/actions/workflows/macos-launcher.yml/dispatches" -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"$1\"}}")
+	[ "$CODE" = 204 ] || { echo "publish: starting the macOS workflow failed ($CODE): is .github/workflows/macos-launcher.yml pushed?"; exit 1; }
+	echo "macOS launcher: building on GitHub (https://github.com/$GH_REPO/actions); it adds WhiteRecompLauncher_macos.zip to $1"
+}
+if [ "${1:-}" = macos ]; then
+	TAG=${2:?usage: launcher/publish.sh macos TAG}
+	gh_token
+	ID=$(curl -s -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/$GH_REPO/releases/tags/$TAG" | sed -n 's/^  "id": \([0-9]*\),$/\1/p' | head -1)
+	[ -n "$ID" ] || { echo "publish: no release $TAG"; exit 1; }
+	macos_start "$TAG" "$ID"
+	exit 0
+fi
 if [ "${1:-}" = release ]; then
 	TAG=${2:?usage: launcher/publish.sh release TAG [REPO]}
 	REPO=${3:-/mnt/c/Users/psivstar/Documents/proj/WhiteRecomp}
@@ -31,8 +62,7 @@ if [ "${1:-}" = release ]; then
 		[ -f "$f" ] || { echo "publish: $f is missing (launcher/build.sh all, launcher/build.sh linux_arm64)"; exit 1; }
 	done
 	no_sources "$REPO"
-	TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | "$WINGIT" credential fill | sed -n 's/^password=//p')
-	[ -n "$TOKEN" ] || { echo "publish: not signed in to GitHub"; exit 1; }
+	gh_token
 	SHA=$(cd "$REPO" && "$WINGIT" rev-parse origin/main | tr -d '\r')
 	if [ "${REPLACE:-0}" = 1 ]; then # REPLACE=1: every earlier release and its tag deleted first
 		curl -s -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/$GH_REPO/releases?per_page=100" |
@@ -50,7 +80,7 @@ if [ "${1:-}" = release ]; then
 	OUT=$(mktemp)
 	CODE=$(curl -s -o "$OUT" -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
 		"https://api.github.com/repos/$GH_REPO/releases" \
-		-d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"$SHA\",\"name\":\"WhiteRecomp $TAG\",\"body\":\"Download the launcher for your system: WhiteRecompLauncher_windows.exe (Windows) or WhiteRecompLauncher_linux (Linux x86-64) or WhiteRecompLauncher_linux_arm64 (Linux ARM64; chmod +x either). Put it in a folder of its own: Build makes the game beside it. See README.md.\"}")
+		-d "{\"tag_name\":\"$TAG\",\"target_commitish\":\"$SHA\",\"name\":\"WhiteRecomp $TAG\",\"body\":\"Download the launcher for your system: WhiteRecompLauncher_windows.exe (Windows) or WhiteRecompLauncher_linux (Linux x86-64) or WhiteRecompLauncher_linux_arm64 (Linux ARM64; chmod +x either) or WhiteRecompLauncher_macos.zip (macOS, Apple silicon or Intel; experimental, not signed: right-click the app and choose Open the first time). Put it in a folder of its own: Build makes the game beside it. See README.md.\"}")
 	[ "$CODE" = 201 ] || { echo "publish: creating release $TAG failed ($CODE):"; cat "$OUT"; rm -f "$OUT"; exit 1; }
 	ID=$(sed -n 's/^  "id": \([0-9]*\),$/\1/p' "$OUT" | head -1)
 	rm -f "$OUT"
@@ -61,6 +91,7 @@ if [ "${1:-}" = release ]; then
 		[ "$CODE" = 201 ] || { echo "publish: uploading $n failed ($CODE)"; exit 1; }
 		echo "uploaded $n"
 	done
+	macos_start "$TAG" "$ID"
 	echo "https://github.com/$GH_REPO/releases/tag/$TAG"
 	exit 0
 fi
@@ -71,6 +102,8 @@ rm -f "$REPO/README.txt" # (the plain-text one before README.md)
 sed 's/\r*$/\r/' launcher/release/THIRD_PARTY_LICENSES.txt > "$REPO/THIRD_PARTY_LICENSES.txt"
 rsync -a --delete --exclude bundle.bin --exclude shared --exclude README.md launcher/ "$REPO/launcher_src/"
 rsync -a --delete --exclude ols.json shared/ "$REPO/launcher_src/shared/"
+mkdir -p "$REPO/.github/workflows"
+cp launcher/release/macos-launcher.yml "$REPO/.github/workflows/macos-launcher.yml"
 no_sources "$REPO"
 cat > "$REPO/launcher_src/README.md" <<'MD'
 # WhiteRecomp launcher sources

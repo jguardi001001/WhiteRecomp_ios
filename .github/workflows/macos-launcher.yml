@@ -1,0 +1,78 @@
+# The macOS launcher (WhiteRecomp.app), built on GitHub's Mac runners -- the maintainer has no Mac.
+# Started by launcher/publish.sh release TAG (or by hand: Actions > macOS launcher > Run workflow, with the tag) after
+# it has uploaded bundle_macos.bin (launcher/build.sh macos) to release TAG. It builds the launcher for both kinds of
+# Mac (launcher/release.sh: Apple silicon and Intel, joined with lipo), with MoltenVK and SDL2 (both universal, from
+# their own releases) in the app, uploads WhiteRecompLauncher_macos.zip to the release and deletes bundle_macos.bin
+# from it. The app is not signed (no Developer ID): the first time, right-click > Open, or
+# xattr -dr com.apple.quarantine WhiteRecomp.app.
+# (Copied here from ff13decomp2's launcher/release/macos-launcher.yml by launcher/publish.sh.)
+name: macOS launcher
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (it must have bundle_macos.bin)"
+        required: true
+permissions:
+  contents: write
+env:
+  ODIN_COMMIT: e28f5d1ff420ce2cfd7f1f5a9a91f8b37956445e # (the Odin the other launchers are built with)
+  MOLTENVK_VERSION: v1.4.0
+  SDL2_VERSION: 2.32.8
+  GH_TOKEN: ${{ github.token }}
+  TAG: ${{ inputs.tag }}
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: repo
+      - uses: actions/checkout@v4
+        with:
+          repository: odin-lang/Odin
+          ref: ${{ env.ODIN_COMMIT }}
+          path: odin
+      - name: Odin
+        run: |
+          brew install llvm@20
+          cd odin && ./build_odin.sh release
+          ./odin version
+      - name: MoltenVK and SDL2 (universal)
+        run: |
+          mkdir -p deps && cd deps
+          curl -fsSL -o mvk.tar "https://github.com/KhronosGroup/MoltenVK/releases/download/$MOLTENVK_VERSION/MoltenVK-macos.tar"
+          tar xf mvk.tar
+          MVK=$(find . -path '*dylib/macOS/libMoltenVK.dylib' | head -1)
+          cp "$MVK" libMoltenVK.dylib
+          cp "$(find . -maxdepth 2 -name LICENSE | head -1)" MoltenVK_LICENSE
+          curl -fsSL -o sdl.dmg "https://github.com/libsdl-org/SDL/releases/download/release-$SDL2_VERSION/SDL2-$SDL2_VERSION.dmg"
+          hdiutil attach -nobrowse -readonly -mountpoint "$PWD/sdlmnt" sdl.dmg
+          cp sdlmnt/SDL2.framework/Versions/A/SDL2 libSDL2-2.0.0.dylib
+          cp "$(find sdlmnt/SDL2.framework/ -name 'LICENSE*' | head -1)" SDL2_LICENSE.txt
+          hdiutil detach sdlmnt
+          install_name_tool -id @rpath/libSDL2-2.0.0.dylib libSDL2-2.0.0.dylib
+          codesign --force --sign - libSDL2-2.0.0.dylib
+          lipo -archs libMoltenVK.dylib; lipo -archs libSDL2-2.0.0.dylib
+      - name: The bundle
+        run: gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p bundle_macos.bin -D deps
+      - name: Build
+        run: |
+          # (release.sh's layout: launcher/ and shared/ side by side, as in ff13decomp2)
+          mkdir -p work && cp -R repo/launcher_src work/launcher && mv work/launcher/shared work/shared
+          cp repo/README.md work/launcher/release/README.md # (publish.sh keeps it at the repo's root only)
+          cd work
+          ODIN="$GITHUB_WORKSPACE/odin/odin" BUNDLE="$GITHUB_WORKSPACE/deps/bundle_macos.bin" \
+          MOLTENVK="$GITHUB_WORKSPACE/deps/libMoltenVK.dylib" MOLTENVK_LICENSE="$GITHUB_WORKSPACE/deps/MoltenVK_LICENSE" \
+          SDL2="$GITHUB_WORKSPACE/deps/libSDL2-2.0.0.dylib" SDL2_LICENSE="$GITHUB_WORKSPACE/deps/SDL2_LICENSE.txt" \
+            sh launcher/release.sh
+          # (ad-hoc signature: Apple silicon runs nothing unsigned)
+          codesign --force --deep --sign - dist/WhiteRecomp.app
+          rm -f dist/ff13-launcher-macos.zip
+          ditto -c -k --keepParent dist/WhiteRecomp.app "$GITHUB_WORKSPACE/WhiteRecompLauncher_macos.zip"
+          ls -la "$GITHUB_WORKSPACE/WhiteRecompLauncher_macos.zip"
+      - name: Upload
+        run: gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber WhiteRecompLauncher_macos.zip
+      - name: The bundle off the release
+        if: always()
+        run: gh release delete-asset "$TAG" bundle_macos.bin -R "$GITHUB_REPOSITORY" -y || true
