@@ -4,6 +4,8 @@ Extremely optimized re-compilation of FF13 currently targeting x64 Windows or x6
 
 WhiteRecomp builds a native port of **FINAL FANTASY XIII** on your own computer. It uses your own Steam version of the game to do this.
 
+If you're having issues (rendering, slowdowns) with the recomp, please join the Discord and message me: https://discord.gg/FHpmpnBJC
+
 > [!IMPORTANT]
 > WhiteRecomp does **not** contain the game or any copyrighted game data or assets. You need a legitimate copy of FINAL FANTASY XIII installed from Steam (the current Steam version).
 
