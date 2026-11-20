@@ -1,5 +1,6 @@
-// The Cross-Compile tab: builds the game for another kind of computer than the one the launcher runs on (today Linux
-// on ARM64: a Raspberry Pi, an ARM laptop, Asahi Linux on a Mac), from any launcher -- Windows or Linux, x86-64.
+// The Cross-Compile tab: builds the game for another kind of computer than the one the launcher runs on (Linux on
+// ARM64: a Raspberry Pi, an ARM laptop, Asahi Linux on a Mac; Android on ARM64: phones, tablets, handhelds), from any
+// launcher -- Windows or Linux, x86-64.
 // The same Build as the Home tab's (build_game.odin), with the Options tab's options, but:
 //   - the compiler is Clang (every Clang can target every architecture) with LLVM's linker, lld (it links ELF files
 //     on Windows too), told the target (--target=aarch64-linux-gnu) and the target's system files: the bundle carries
@@ -9,6 +10,11 @@
 //   - its own objects (data dir obj-<target>/) and output folder beside the launcher (WhiteRecomp-<target>/): the
 //     program, a WhiteRecomp.cfg whose paths start with ./ (the game reads them from its own folder:
 //     src/runtime/xrc_rt.c load_cfg), an empty cdrive/ for the saves, and a README.txt that says how to set it up there
+// Android (ARM64) differs again: the game is the app's libmain.so (a NativeActivity: src/runtime/xrc_android.c),
+// position-independent, linked against the bundle's Android system files (cross/android_arm64/sysroot: Android 10's
+// API, no NDK needed) with Clang's runtime for it named outright (another computer's Clang has none); no FFmpeg (no
+// cutscenes yet); and the launcher packs it into WhiteRecomp.apk itself (apk.odin), with the options as the APK's
+// WhiteRecomp.cfg asset.
 // --cross-build <target> on the command line does the same without a window.
 package launcher
 
@@ -25,10 +31,12 @@ Cross_Cpu :: struct {
 }
 
 Cross_Target :: struct {
-	key:    string, // the bundle's cross/<key>/, and the names of its objects' and output folders
-	name:   string,
-	triple: string,
-	cpus:   []Cross_Cpu,
+	key:     string, // the bundle's cross/<key>/, and the names of its objects' and output folders
+	name:    string,
+	triple:  string,
+	cpus:    []Cross_Cpu,
+	note:    string, // (the tab's line about it)
+	android: bool,
 }
 
 cross_targets := []Cross_Target {
@@ -43,7 +51,26 @@ cross_targets := []Cross_Target {
 			{"apple-m1", "Apple M1 / M2 (Asahi Linux)"},
 			{"neoverse-n1", "Ampere / Graviton 2 servers"},
 		},
+		note = "64-bit ARM Linux (glibc 2.34 or newer: Debian 12, Ubuntu 22.04, Raspberry Pi OS 12 and later)",
 	},
+	{
+		key = "android_arm64",
+		name = "Android ARM64",
+		triple = "aarch64-linux-android29",
+		cpus = {
+			{"generic", "Any ARM64 phone (Default)"},
+			{"cortex-a76", "2019 and later flagships (Cortex-A76)"},
+			{"cortex-x1", "2021 and later flagships (Cortex-X1)"},
+		},
+		note = "Android 10 or newer, 64-bit ARM, Vulkan: an APK to install (no cutscenes yet)",
+		android = true,
+	},
+}
+
+// what a target's Build makes in its folder: the program, or Android's APK
+cross_out_file :: proc(x: ^Cross_Target) -> string {
+	if x.android {return GAME_NAME + ".apk"}
+	return appimage_on({cross = x}) ? appimage_file(appimage_arch({cross = x})) : GAME_NAME
 }
 
 cross_target :: proc() -> ^Cross_Target {
@@ -94,13 +121,18 @@ cross_build_task :: proc(t: ^Task) {
 		obj       = data_path(fmt.tprintf("obj-%s", x.key)),
 		out_dir   = cross_out_dir(x),
 	}
+	if x.android {spec.ffdir = ""}
 	logf(t, "Target: %s, CPU %s", x.name, spec.cpu)
 	logf(t, "Linker: %s", lld)
 	build_task(t, spec)
 }
 
-// the output folder's README.txt and WhiteRecomp.cfg (paths from the game's own folder)
-cross_write_extras :: proc(x: ^Cross_Target, dir: string) -> bool {
+// the output folder's README.txt and WhiteRecomp.cfg (paths from the game's own folder); Android: the APK (from the
+// linked lib), its README
+cross_write_extras :: proc(t: ^Task, x: ^Cross_Target, dir, lib: string, appimage := false) -> bool {
+	if x.android {return android_write_output(t, x, dir, lib)}
+	if appimage {return cross_write_appimage(t, x, dir, lib)}
+	_ = os.remove(pjoin({dir, appimage_file(appimage_arch({cross = x}))}, context.temp_allocator)) // (an earlier AppImage build's)
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "# WhiteRecomp's settings for %s, written by the launcher's Cross-Compile Build.\n", x.name)
 	fmt.sbprintf(&b, "# A path that starts with ./ is from this folder. The environment overrides any of them.\n")
@@ -126,6 +158,38 @@ cross_write_extras :: proc(x: ^Cross_Target, dir: string) -> bool {
 	return os.write_entire_file(pjoin({dir, "README.txt"}, context.temp_allocator), r.buf[:]) == nil
 }
 
+// As AppImage: WhiteRecomp-<arch>.AppImage (its .cfg inside: the game's options; the install and the saves beside it,
+// set by its AppRun) and README.txt -- in place of the program, its .cfg and cdrive/ (an earlier plain build's go)
+@(private = "file")
+cross_write_appimage :: proc(t: ^Task, x: ^Cross_Target, dir, exe: string) -> bool {
+	arch := appimage_arch({cross = x})
+	name := appimage_file(arch)
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "# WhiteRecomp's settings for %s, written by the launcher's Cross-Compile Build (inside its AppImage).\n", x.name)
+	fmt.sbprintf(&b, "# The game's install and the saves are beside the .AppImage (its AppRun). The environment overrides any of them.\n")
+	cfg_game_lines(&b, {cross = x})
+	if !appimage_pack(t, pjoin({dir, name}, context.temp_allocator), exe, strings.to_string(b), arch, portable = true) {return false}
+	_ = os.remove(pjoin({dir, GAME_NAME}, context.temp_allocator))
+	_ = os.remove(pjoin({dir, GAME_NAME + ".cfg"}, context.temp_allocator))
+	if os.is_dir(pjoin({dir, "cdrive"}, context.temp_allocator)) {_ = os.remove(pjoin({dir, "cdrive"}, context.temp_allocator))} // (only when empty)
+	r := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&r, "WhiteRecomp for %s (AppImage)\n", x.name)
+	fmt.sbprintf(&r, "======================================\n\n")
+	fmt.sbprintf(&r, "Built by the WhiteRecomp launcher's Cross-Compile tab, for another computer (CPU: %s).\n\n", cross_cpu(x))
+	fmt.sbprintf(&r, "To play there:\n")
+	fmt.sbprintf(&r, "  1. Copy %s to a folder on that computer.\n", name)
+	fmt.sbprintf(&r, "  2. Put your FINAL FANTASY XIII folder (the one with white_data in it) next to it, named \"FINAL FANTASY XIII\",\n")
+	fmt.sbprintf(&r, "     or link it there:   ln -s \"/path/to/FINAL FANTASY XIII\" \"FINAL FANTASY XIII\"\n")
+	fmt.sbprintf(&r, "     (or start it with XRC_GAME_DIR set to where it is).\n")
+	fmt.sbprintf(&r, "     Converted cutscenes (white_data/movie/*.mp4) come with it: convert them on a Windows PC first.\n")
+	fmt.sbprintf(&r, "  3. chmod +x %s, then run ./%s\n", name, name)
+	fmt.sbprintf(&r, "     It needs Vulkan graphics drivers and SDL2 (e.g. sudo apt install libsdl2-2.0-0 mesa-vulkan-drivers),\n")
+	fmt.sbprintf(&r, "     OpenSSL 3, and FUSE 2 to open AppImages (sudo apt install libfuse2, or libfuse2t64). Without FUSE:\n")
+	fmt.sbprintf(&r, "     ./%s --appimage-extract-and-run\n\n", name)
+	fmt.sbprintf(&r, "Saves go in cdrive/ next to the AppImage. To bring your saves from the PC, copy the launcher's cdrive folder there.\n")
+	return os.write_entire_file(pjoin({dir, "README.txt"}, context.temp_allocator), r.buf[:]) == nil
+}
+
 // ---------------------------------------------------------------------------------------------- the tab
 draw_cross :: proc(g: ^Gui, r: ui.Rect) {
 	running := sync.atomic_load(&task.running)
@@ -136,12 +200,17 @@ draw_cross :: proc(g: ^Gui, r: ui.Rect) {
 
 	bottom, top := ui.cut_bottom(r, px(g, 44))
 	_, top = ui.cut_bottom(top, px(g, 16))
+	ai_row: ui.Rect // (a Linux target: As AppImage, above the Build button)
+	if !x.android {
+		ai_row, top = ui.cut_bottom(top, px(g, 32))
+		_, top = ui.cut_bottom(top, px(g, 10))
+	}
 	head, rest := ui.cut_top(top, px(g, 24))
 	label(g, g.font, "Builds the game for another kind of computer, with the Options tab's options. It runs there, not here.", head, DIM)
 	_, rest = ui.cut_top(rest, px(g, 8))
 
 	row_h := px(g, 46)
-	nrows := 5
+	nrows := x.android ? 6 : 5
 	oc, after := ui.cut_top(rest, nrows * row_h + px(g, 16))
 	card(g, oc)
 	oi := ui.inset_xy(oc, px(g, 20), px(g, 8))
@@ -167,7 +236,7 @@ draw_cross :: proc(g: ^Gui, r: ui.Rect) {
 			if t.key == x.key {sel = i}
 		}
 		if n, ch := dropdown(g, "xtarget", ctrl, names, sel, active = active); ch {settings.cross_target = cross_targets[n].key; changed = true}
-		label(g, g.small, "64-bit ARM Linux (glibc 2.34 or newer: Debian 12, Ubuntu 22.04, Raspberry Pi OS 12 and later)", note, DIM)
+		label(g, g.small, x.note, note, DIM)
 	}
 	// CPU
 	{
@@ -180,7 +249,13 @@ draw_cross :: proc(g: ^Gui, r: ui.Rect) {
 			if c.key == cur {sel = i}
 		}
 		if n, ch := dropdown(g, "xcpu", ctrl, names, sel, active = active); ch {settings.cross_cpu = x.cpus[n].key; changed = true}
-		label(g, g.small, sel == 0 ? "Runs on every ARM64 CPU" : "Faster there, but only that CPU and newer ones", note, DIM)
+		label(g, g.small, sel == 0 ? (x.android ? "Runs on every 64-bit ARM phone" : "Runs on every ARM64 CPU") : "Faster there, but only that CPU and newer ones", note, DIM)
+	}
+	// Android: the options it is built with whatever the Options tab says (options.odin build_settings)
+	if x.android {
+		ctrl, note := next(g, oi, &row, row_h, label_w, ctrl_w, "Settings:")
+		label(g, g.font, "Phone settings", ctrl, TEXT)
+		label(g, g.small, "Forced: 30 fps, 512 shadows, anti-aliasing off, half-res effects, 4 GB memory, -O1, 2 pipeline threads", note, DIM)
 	}
 	// Compiler and linker
 	{
@@ -209,7 +284,7 @@ draw_cross :: proc(g: ^Gui, r: ui.Rect) {
 	out := cross_out_dir(x)
 	{
 		ctrl, note := next(g, oi, &row, row_h, label_w, ctrl_w, "Output:")
-		have := file_exists(pjoin({out, GAME_NAME}, context.temp_allocator))
+		have := file_exists(pjoin({out, cross_out_file(x)}, context.temp_allocator))
 		label(g, g.font, have ? "Built" : "Not built yet", ctrl, have ? GOOD : DIM)
 		label(g, g.small, out, note, DIM)
 	}
@@ -222,6 +297,7 @@ draw_cross :: proc(g: ^Gui, r: ui.Rect) {
 	if button(g, build_r, fmt.tprintf("Build for %s", x.name), can, primary = true, f = g.bold) {
 		task_start(fmt.tprintf("Build for %s", x.name), proc(t: ^Task) {cross_build_task(t)})
 	}
+	if !x.android && appimage_switch(g, "xappimage", build_r, ai_row, &settings.cross_appimage, active) {save_settings()}
 	tip := running ? "Wait for the current task to finish." : !gs.ok ? "Needs the game (its exe is read for the build): choose its folder on the Home tab." : why != "" ? why : fmt.tprintf("Builds the game for %s into %s.", x.name, out)
 	tooltip_zone(g, "xbuild", build_r, tip)
 	if running {

@@ -41,7 +41,7 @@ Surface_Kind :: enum u8 {
 Native_Surface :: struct {
 	kind:      Surface_Kind,
 	window:    rawptr, // Win32: HWND; Wayland: wl_surface; Cocoa: CAMetalLayer
-	display:   rawptr, // Win32: HINSTANCE; Wayland: wl_display
+	display:   rawptr, // Win32: HINSTANCE; Wayland: wl_display; Cocoa: NSView
 	width:     int, // in pixels
 	height:    int,
 	dpi_scale: f32, // 1 = 96 dpi

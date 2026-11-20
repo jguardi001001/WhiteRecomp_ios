@@ -85,7 +85,8 @@ build_task :: proc(t: ^Task, spec: Build_Spec = {}) {
 	if x != nil { 	// (the target's system files and FFmpeg)
 		xn := bundle_extract(t, data_dir, {fmt.tprintf("cross/%s/", x.key)})
 		if xn < 0 {t.failed = true; return}
-		if !file_exists(pjoin({spec.ffdir, "lib", "libavcodec.a"}, context.temp_allocator)) {
+		have := x.android ? file_exists(pjoin({spec.sysroot, "glue", "android_native_app_glue.c"}, context.temp_allocator)) : file_exists(pjoin({spec.ffdir, "lib", "libavcodec.a"}, context.temp_allocator))
+		if !have {
 			logf(t, "This launcher carries no files for %s.", x.name)
 			t.failed = true
 			return
@@ -110,13 +111,18 @@ build_task :: proc(t: ^Task, spec: Build_Spec = {}) {
 	// FFmpeg: the player's own build in the data dir's ffmpeg/ (LGPL: they may relink the game with a modified FFmpeg;
 	// the launcher never writes there), else the bundled one
 	ffdir := x != nil ? spec.ffdir : pjoin({src, "ffmpeg"}, context.temp_allocator)
+	fflib := "lib"
+	// (the macOS bundle carries both kinds of Mac's: lib/ Apple silicon's, lib_x86_64/ Intel's)
+	when ODIN_OS == .Darwin && ODIN_ARCH == .amd64 {if x == nil {fflib = "lib_x86_64"}}
 	if own := data_path("ffmpeg"); x == nil && file_exists(pjoin({own, "lib", "libavcodec.a"}, context.temp_allocator)) {
 		ffdir = own
+		fflib = "lib"
 		logf(t, "FFmpeg: your own build in %s", own)
 	}
 	append(&rt_flags, "-I", inc, "-I", rt, "-I", pjoin({src, "ffmpeg", "include"}, context.temp_allocator)) // (the headers: the same for every target)
 	if own := data_path("ffmpeg"); x == nil && ffdir == own {append(&rt_flags, "-I", pjoin({own, "include"}, context.temp_allocator))}
 	append(&rt_flags, "-DXRC_VULKAN", "-I", pjoin({src, "vulkan", "include"}, context.temp_allocator))
+	if x != nil && x.android {append(&rt_flags, "-I", pjoin({spec.sysroot, "glue"}, context.temp_allocator))} // (android_native_app_glue.h)
 	if reference {append(&rt_flags, "-DXRC_REFERENCE")}
 	logf(t, "Options: %v", runtime_option_flags(spec))
 	if settings.lto && !lto_on(spec) {logf(t, "Link-Time Optimization is off for this build: Clang's needs LLVM's linker (ld.lld) beside it, and there is none.")}
@@ -145,6 +151,19 @@ build_task :: proc(t: ^Task, spec: Build_Spec = {}) {
 			if strings.has_prefix(e.name, "ref_") && !reference {continue}
 			append(&units, Unit{e.fullpath, pjoin({obj, strings.concatenate({"rt_", e.name[:len(e.name) - 2], ".o"}, context.temp_allocator)}, context.temp_allocator), rt_flags[:]})
 		}
+	}
+	// the game's hand-written override routines (xrc --override, copied beside the pages: gen/src/overrides)
+	if list, err := os.read_all_directory_by_path(pjoin({src, "gen", "src", "overrides"}, context.temp_allocator), context.temp_allocator); err == nil {
+		for e in list {
+			if !strings.has_suffix(e.name, ".c") {continue}
+			append(&units, Unit{e.fullpath, pjoin({obj, strings.concatenate({"ovr_", e.name[:len(e.name) - 2], ".o"}, context.temp_allocator)}, context.temp_allocator), rt_flags[:]})
+		}
+	}
+	if x != nil && x.android { 	// (the NDK's NativeActivity glue: its entry, ANativeActivity_onCreate, exported)
+		glue_flags := make([dynamic]string, context.temp_allocator)
+		append(&glue_flags, ..rt_flags[:])
+		append(&glue_flags, "-fvisibility=default")
+		append(&units, Unit{pjoin({spec.sysroot, "glue", "android_native_app_glue.c"}, context.temp_allocator), pjoin({obj, "rt_android_native_app_glue.o"}, context.temp_allocator), glue_flags[:]})
 	}
 	slice.sort_by(units[:], proc(a, b: Unit) -> bool {return a.src < b.src})
 
@@ -236,6 +255,9 @@ build_task :: proc(t: ^Task, spec: Build_Spec = {}) {
 	gdir := x != nil ? spec.out_dir : game_out_dir()
 	_ = os.make_directory_all(gdir)
 	out_exe := pjoin({gdir, strings.concatenate({GAME_NAME, x != nil ? "" : EXE_SUFFIX}, context.temp_allocator)}, context.temp_allocator)
+	if x != nil && x.android {out_exe = pjoin({obj, "libmain.so"}, context.temp_allocator)} // (packed into the APK after)
+	appimage := appimage_on(spec)
+	if appimage {out_exe = pjoin({obj, GAME_NAME}, context.temp_allocator)} // (packed into the AppImage after)
 	rsp := strings.builder_make(context.temp_allocator)
 	for u in units {
 		p, _ := strings.replace_all(u.obj, "\\", "/", context.temp_allocator)
@@ -249,10 +271,15 @@ build_task :: proc(t: ^Task, spec: Build_Spec = {}) {
 	append(&args, ..link_option_flags(spec))
 	append(&args, "-o", out_exe, strings.concatenate({"@", rsp_file}, context.temp_allocator))
 	// FFmpeg (static, in dependency order), then what it needs of the system
-	for l in ([]string{"libavformat.a", "libavcodec.a", "libswresample.a", "libavutil.a"}) {
-		append(&args, pjoin({ffdir, "lib", l}, context.temp_allocator))
+	if x == nil || !x.android {
+		for l in ([]string{"libavformat.a", "libavcodec.a", "libswresample.a", "libavutil.a"}) {
+			append(&args, pjoin({ffdir, fflib, l}, context.temp_allocator))
+		}
 	}
-	if x != nil {
+	if x != nil && x.android { 	// (Android: Clang's runtime from the bundle, then the system's libraries)
+		append(&args, pjoin({spec.sysroot, "builtins", "libclang_rt.builtins-aarch64-android.a"}, context.temp_allocator))
+		append(&args, ..CROSS_ANDROID_SYS_LIBS)
+	} else if x != nil {
 		append(&args, ..CROSS_LINUX_SYS_LIBS)
 	} else {
 		append(&args, ..FFMPEG_SYS_LIBS)
@@ -268,14 +295,28 @@ build_task :: proc(t: ^Task, spec: Build_Spec = {}) {
 		return
 	}
 	if x != nil { 	// (a cross build: its own .cfg and README.txt; nothing of this computer's)
-		if !cross_write_extras(x, gdir) {logf(t, "Cannot write the settings in %s.", gdir); t.failed = true; return}
-		logf(t, "Built %s: copy the folder %s to the %s computer (its README.txt says how).", out_exe, gdir, x.name)
+		if !cross_write_extras(t, x, gdir, out_exe, appimage) {logf(t, "Cannot write the output in %s.", gdir); t.failed = true; return}
+		if appimage {
+			logf(t, "Built %s: copy it to the %s computer with %s (it says how).", pjoin({gdir, cross_out_file(x)}, context.temp_allocator), x.name, pjoin({gdir, "README.txt"}, context.temp_allocator))
+		} else if x.android {
+			logf(t, "Built %s: install it on the %s device; %s says how, and where the game's files go.", pjoin({gdir, cross_out_file(x)}, context.temp_allocator), x.name, pjoin({gdir, "README.txt"}, context.temp_allocator))
+		} else {
+			logf(t, "Built %s: copy the folder %s to the %s computer (its README.txt says how).", out_exe, gdir, x.name)
+		}
 		set_status(t, 1, "Built")
 		return
 	}
 	// the movie converter the game runs in the background for movies without their MP4 (Windows: tools/bink2mp4.exe),
 	// and the Steam achievements helper (tools/steamhelper.exe)
 	when ODIN_OS == .Windows {_ = bundle_extract(t, data_dir, {"tools/"})}
+	if appimage { 	// (its .cfg inside it, with this computer's paths)
+		ai := pjoin({gdir, appimage_file(appimage_arch())}, context.temp_allocator)
+		if !appimage_pack(t, ai, out_exe, cfg_text(), appimage_arch(), portable = false) {t.failed = true; return}
+		_ = os.make_directory_all(data_path("cdrive"))
+		logf(t, "Built %s", ai)
+		set_status(t, 1, "Built")
+		return
+	}
 	if !write_cfg(gdir) {
 		logf(t, "Cannot write %s in %s.", GAME_NAME + ".cfg", gdir)
 		t.failed = true
@@ -314,8 +355,10 @@ pgo_prepare :: proc(t: ^Task, cc, profile: string, spec: Build_Spec = {}) {
 
 GAME_NAME :: "WhiteRecomp"
 
-// where the game is built: the launcher's own folder
+// where the game is built: the launcher's own folder (macOS: the data folder's game/ -- the launcher is inside its
+// signed .app, which nothing may be added to, and often in /Applications)
 game_out_dir :: proc() -> string {
+	when ODIN_OS == .Darwin {return data_path("game")}
 	d, err := os.get_executable_directory(context.temp_allocator)
 	if err != nil || d == "" {return data_path("game")}
 	return d
@@ -326,19 +369,29 @@ game_out_dir :: proc() -> string {
 // cdrive), the movie converter and the ffmpeg it runs for the movies without their MP4 (host_movie_convert.c), and the
 // game's own arguments (Shadow Resolution, Anti-Aliasing: XRC_GAME_ARGS)
 // the .cfg lines of the game's own options (every build's)
-cfg_game_lines :: proc(b: ^strings.Builder) {
-	fmt.sbprintf(b, "XRC_GAME_ARGS=%s\n", game_args())
-	if settings.shadow_res == 0 {fmt.sbprintf(b, "XRC_NO_SHADOWS=1\n")}
-	if settings.memory_2gb {fmt.sbprintf(b, "XRC_GUEST_2GB=1\n")}
-	if settings.stretch {fmt.sbprintf(b, "XRC_STRETCH=1\n")}
-	if settings.fx_full {fmt.sbprintf(b, "XRC_VK_HALF_FX=0\n")}
-	if settings.steam_off {fmt.sbprintf(b, "XRC_NO_STEAM=1\n")}
-	if settings.aa_fxaa && settings.aa_quality > 1 {fmt.sbprintf(b, "XRC_FXAA=%d\n", settings.aa_quality)}
-	if settings.convert_threads == 0 {fmt.sbprintf(b, "XRC_MOVIE_NO_CONVERT=1\n")}
+cfg_game_lines :: proc(b: ^strings.Builder, spec: Build_Spec = {}) {
+	s := build_settings(spec)
+	fmt.sbprintf(b, "XRC_GAME_ARGS=%s\n", game_args(s))
+	if s.shadow_res == 0 {fmt.sbprintf(b, "XRC_NO_SHADOWS=1\n")}
+	if s.memory_2gb {fmt.sbprintf(b, "XRC_GUEST_2GB=1\n")}
+	if s.stretch {fmt.sbprintf(b, "XRC_STRETCH=1\n")}
+	if s.fx_full {fmt.sbprintf(b, "XRC_VK_HALF_FX=0\n")}
+	if s.steam_off {fmt.sbprintf(b, "XRC_NO_STEAM=1\n")}
+	if s.aa_fxaa && s.aa_quality > 1 {fmt.sbprintf(b, "XRC_FXAA=%d\n", s.aa_quality)}
+	if spec.cross != nil && spec.cross.android {
+		fmt.sbprintf(b, "XRC_VK_PIPE_THREADS=%d\n", s.pipe_threads) // (no cutscene conversion there)
+		return
+	}
+	if s.convert_threads == 0 {fmt.sbprintf(b, "XRC_MOVIE_NO_CONVERT=1\n")} else {fmt.sbprintf(b, "XRC_MOVIE_THREADS=%d\n", convert_threads())} // (read by the game when it starts converting: no rebuild)
 	fmt.sbprintf(b, "XRC_VK_PIPE_THREADS=%d\n", pipe_threads())
 }
 
 write_cfg :: proc(gdir: string) -> bool {
+	text := cfg_text()
+	return os.write_entire_file(pjoin({gdir, GAME_NAME + ".cfg"}, context.temp_allocator), transmute([]u8)text) == nil
+}
+
+cfg_text :: proc() -> string {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "# WhiteRecomp's settings, written by the launcher's Build (the environment overrides them)\n")
 	fmt.sbprintf(&b, "XRC_GAME_DIR=%s\n", settings.game_dir)
@@ -349,6 +402,76 @@ write_cfg :: proc(gdir: string) -> bool {
 		fmt.sbprintf(&b, "XRC_STEAM_HELPER=%s\n", data_path("tools", "steamhelper.exe"))
 		if ff := dep_get(.FFmpeg); ff.can_encode && ff.path != "" {fmt.sbprintf(&b, "XRC_MOVIE_FFMPEG=%s\n", ff.path)}
 	}
+	when ODIN_OS == .Darwin {
+		// the .app's own MoltenVK (Vulkan on Metal) and SDL2 (window, controllers, sound), if it has them: the game
+		// loads those; else it looks in Homebrew's and /usr/local's lib
+		if fw := app_frameworks_dir(); fw != "" {
+			if mvk := pjoin({fw, "libMoltenVK.dylib"}, context.temp_allocator); file_exists(mvk) {fmt.sbprintf(&b, "XRC_VK_LIB=%s\n", mvk)}
+			if sdl := pjoin({fw, "libSDL2-2.0.0.dylib"}, context.temp_allocator); file_exists(sdl) {fmt.sbprintf(&b, "XRC_SDL_LIB=%s\n", sdl)}
+		}
+		fmt.sbprintf(&b, "XRC_NO_STEAM=1\n") // (Steam's macOS client has no FINAL FANTASY XIII to report to)
+	}
 	cfg_game_lines(&b)
-	return os.write_entire_file(pjoin({gdir, GAME_NAME + ".cfg"}, context.temp_allocator), b.buf[:]) == nil
+	return strings.to_string(b)
+}
+
+// ---------------------------------------------------------------------------------------------- Delete Last Build
+// The compiled objects of every build: obj/ (the game for this computer) and obj-<target>/ (each Cross-Compile target),
+// in the data folder. Deleting them makes the next Build compile every file again instead of reusing (and linking) the
+// objects of the last one. The built game, its WhiteRecomp.cfg, the saves (cdrive), the unpacked sources and the
+// Android signing key stay.
+build_obj_dirs :: proc() -> [dynamic]string {
+	out := make([dynamic]string, context.temp_allocator)
+	list, err := os.read_all_directory_by_path(data_dir, context.temp_allocator)
+	if err != nil {return out}
+	for e in list {
+		if e.type == .Directory && (e.name == "obj" || strings.has_prefix(e.name, "obj-")) {append(&out, e.fullpath)}
+	}
+	return out
+}
+
+@(private = "file")
+dir_usage :: proc(dir: string) -> (files: int, bytes: i64) {
+	list, err := os.read_all_directory_by_path(dir, context.temp_allocator)
+	if err != nil {return}
+	for e in list {
+		if e.type == .Directory {
+			f, b := dir_usage(e.fullpath)
+			files, bytes = files + f, bytes + b
+		} else {
+			files, bytes = files + 1, bytes + e.size
+		}
+	}
+	return
+}
+
+// what Delete Last Build would delete (for its confirmation)
+clean_plan :: proc() -> (files: int, bytes: i64) {
+	for d in build_obj_dirs() {
+		f, b := dir_usage(d)
+		files, bytes = files + f, bytes + b
+	}
+	return
+}
+
+clean_task :: proc(t: ^Task) {
+	dirs := build_obj_dirs()
+	files, bytes := clean_plan()
+	if len(dirs) == 0 {
+		logf(t, "Nothing to delete: there are no build files.")
+		return
+	}
+	failed := 0
+	for d, i in dirs {
+		set_status(t, f32(i) / f32(len(dirs)), "Deleting %s", filepath.base(d))
+		if err := os.remove_all(d); err != nil {
+			logf(t, "Could not delete %s: %v", d, err)
+			failed += 1
+		}
+	}
+	if failed > 0 {
+		t.failed = true
+		return
+	}
+	logf(t, "Deleted the last build's files: %d files, %.0f MB. The next Build compiles everything again.", files, f64(bytes) / 1e6)
 }

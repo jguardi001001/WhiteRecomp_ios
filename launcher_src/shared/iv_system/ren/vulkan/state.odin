@@ -116,6 +116,7 @@ State :: struct {
 	device:           vk.Device,
 	queue:            vk.Queue,
 	queue_family:     u32,
+	api_version:      u32, // the device's (below 1.3: dynamic rendering and synchronization2 are extensions)
 	memory_props:     vk.PhysicalDeviceMemoryProperties,
 
 	// the swapchain (made again when the window's size changes)

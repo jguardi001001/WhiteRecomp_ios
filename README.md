@@ -1,6 +1,6 @@
 # WhiteRecomp
 
-Extremely optimized re-compilation of FF13 currently targeting x64 Windows or x64/ARM64 Linux, with macOS and Android support coming soon.
+Extremely optimized re-compilation of FF13 currently targeting x64 Windows, x64/ARM64 Linux and (experimental) macOS, with Android support coming soon.
 
 WhiteRecomp builds a native port of **FINAL FANTASY XIII** on your own computer. It uses your own Steam version of the game to do this.
 
@@ -16,8 +16,9 @@ Get the launcher for your system from the [Releases page](https://github.com/ps4
 | System | File |
 | --- | --- |
 | Windows (64-bit) | `WhiteRecompLauncher_windows.exe` |
-| Linux (x86-64) | `WhiteRecompLauncher_linux` (run `chmod +x` on it first; less tested than Windows) |
-| Linux (ARM64) | `WhiteRecompLauncher_linux_arm64` (run `chmod +x` on it first; new and least tested: it builds and runs the game on the ARM64 computer itself, which needs Clang, Vulkan drivers and SDL2) |
+| Linux (x86-64) | `WhiteRecompLauncher_linux` (run `chmod +x` on it first; less tested than Windows; needs glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36, SteamOS 3 and later) |
+| Linux (ARM64) | `WhiteRecompLauncher_linux_arm64` (run `chmod +x` on it first; glibc 2.35 or newer, as above; new and least tested: it builds and runs the game on the ARM64 computer itself, which needs Clang, Vulkan drivers and SDL2) |
+| macOS 11 or newer (Apple silicon or Intel) | `ff13-launcher-macos.zip`: unzip it and open `WhiteRecomp.app`. **Experimental and untested so far**: see [macOS](#macos). |
 
 Put the launcher in a folder of its own. **Build** creates the game beside it.
 
@@ -31,16 +32,30 @@ Put the launcher in a folder of its own. **Build** creates the game beside it.
 6. **Convert Movies** (recommended; Windows only for now). This converts the game's cutscenes to MP4, once. It takes about an hour and can be stopped and resumed.
 7. **Discard Movies** (optional). Once the MP4s exist, this frees about 40 GB by cutting the original movie files down.
 
+**As AppImage** (Linux launchers: the switch above **Build**). When it's on, Build makes one file, `WhiteRecomp-x86_64.AppImage` (or `-aarch64` on ARM64), instead of `WhiteRecomp` and its `WhiteRecomp.cfg`: the game, its settings and an icon packed into a single program you can keep anywhere. **Run** starts it. AppImages open through FUSE (`libfuse2` / `libfuse2t64`); without it, Run has the AppImage unpack itself to a temporary folder first. With `mksquashfs` installed (`squashfs-tools`) the AppImage is compressed (about a third of the size); without it, it's packed uncompressed.
+
+**Delete Last Build** (on the Home tab, beside Discard Movies) deletes the compiled files that earlier builds left in the launcher's data folder: those of this computer's game and of every Cross-Compile target. A Build normally reuses the files that haven't changed, which makes rebuilding fast. After deleting them, the next Build compiles everything from scratch, which takes as long as the first one. Use it if a build behaves oddly and you want to rule out leftovers from an earlier build. The built game, its `WhiteRecomp.cfg`, your saves and the game's movies aren't touched. While another task runs, **Cancel** takes this button's place.
+
 ## Requirements
 
 - **FINAL FANTASY XIII from Steam.** WhiteRecomp reads the game program (`ffxiiiimg.exe`, which must be the current Steam version) and all the game's files from your install. It uses the game's own movie decoder (`bink2w32.dll`) once, to convert the movies.
-- **Clang** (the C compiler the game is built with; GCC isn't used).
+- **Clang** (the C compiler the game is built with).
   - On Windows: LLVM-MinGW, or MSYS2's Clang. Visual C++ can't build the game.
-  - On Linux: `clang`.
-  - The launcher lists every Clang it finds and offers to install it if there is none.
+  - On Linux: `clang`, or GCC (`gcc`) if you prefer it.
+  - On macOS: Apple's command line tools (`xcode-select --install`; the launcher offers to start that).
+  - The launcher lists every compiler it can use and offers to install Clang if there is none.
 - **A GPU with Vulkan 1.3.**
 - **Movies:** converting them works on Windows only for now, and the launcher brings the FFmpeg program it needs. Playing converted movies needs no FFmpeg program, because the game has FFmpeg's libraries built in.
 - **Steam achievements and overlay (Windows, Linux):** have Steam running and signed in when you start the game. See [Steam Integration](#steam-integration).
+
+## macOS
+
+macOS support is new and has not been run on a Mac yet. Reports of what works and what doesn't are very welcome.
+
+- **The game files:** FINAL FANTASY XIII on Steam is a Windows game, so Steam for macOS won't install it. Copy the `FINAL FANTASY XIII` folder from a Windows PC (or from a CrossOver or Whisky install of Steam), then pick it with **Browse…**.
+- **What Build makes:** a native game for your Mac (ARM64 on Apple silicon, x86-64 on Intel Macs) in `~/Library/Application Support/ff13-launcher/game`, not beside the launcher (nothing may be added inside a signed app). **Run** starts it.
+- **Graphics, sound and controllers:** the app carries MoltenVK (Vulkan on Apple's Metal) and SDL2, and the game uses those.
+- **Not on macOS:** Convert Movies (convert them on a Windows PC first: the MP4s travel with the game folder), Steam achievements and the overlay, and the Debug & Profile Tools' profiler.
 
 ## Options
 
@@ -158,7 +173,9 @@ How much memory the game can address.
 
 #### Compiler
 
-The C compiler that builds the game: always Clang. The launcher lists every Clang it finds on the system; GCC isn't used (Clang produces a noticeably faster game, and every build is then made the same way).
+The C compiler that builds the game. The launcher lists every Clang it finds on the system, and Clang is the default: it produces a noticeably faster game.
+
+On Linux, GCC is offered too (listed after Clang). Profile-Guided Optimization needs Clang, so it's off with GCC; Link-Time Optimization works with both. On Windows and macOS, only Clang is used.
 
 #### Optimization Level
 
@@ -214,12 +231,14 @@ Every Build also uses these, with no option to turn them off:
 
 ## Cross-Compile
 
-The **Cross-Compile** tab builds the game for another kind of computer than the one the launcher runs on, with the Options tab's options. Today that's **Linux ARM64**: a Raspberry Pi 4 or 5, an ARM laptop, Asahi Linux on an Apple-silicon Mac. It works from the Windows and the Linux launcher.
+The **Cross-Compile** tab builds the game for another kind of computer than the one the launcher runs on, with the Options tab's options: **Linux ARM64** (a Raspberry Pi 4 or 5, an ARM laptop, Asahi Linux on an Apple-silicon Mac) or **Android ARM64** (phones, tablets, Android handhelds). It works from the Windows and the Linux launcher.
 
-- **Target:** Linux ARM64 (64-bit ARM, glibc 2.34 or newer: Debian 12, Ubuntu 22.04, Raspberry Pi OS 12 and later).
-- **CPU:** **Any ARM64 CPU** (default) runs everywhere; choosing the device's CPU (Raspberry Pi 4, Raspberry Pi 5, Apple M1/M2, ...) is faster there, but that build needs that CPU or a newer one.
+- **Target:** Linux ARM64 (64-bit ARM, glibc 2.35 or newer: Debian 12, Ubuntu 22.04, Raspberry Pi OS 12 and later), or Android ARM64 (Android 10 or newer, 64-bit ARM, Vulkan graphics).
+- **CPU:** **Any ARM64 CPU** (default) runs everywhere; choosing the device's CPU (Raspberry Pi 4, Raspberry Pi 5, Apple M1/M2, ...) is faster there, but that build needs that CPU or a newer one. For Android, **Any ARM64 phone** (default) runs everywhere; Cortex-A76 and Cortex-X1 suit 2019 and 2021 or later flagships.
 - **Needs:** Clang and LLVM's linker (lld). LLVM-MinGW and MSYS2's Clang on Windows come with lld; on Linux install it, e.g. `sudo apt install lld`. Everything for the target (its system headers and libraries, its FFmpeg) is packed in the launcher.
 - **Build for Linux ARM64** builds into the folder `WhiteRecomp-linux-arm64` beside the launcher. Copy that folder to the ARM64 computer, put (or link) your `FINAL FANTASY XIII` folder inside it, and run `./WhiteRecomp` there. Its `README.txt` has the steps. That computer needs Vulkan drivers and SDL2 (e.g. `sudo apt install libsdl2-2.0-0 mesa-vulkan-drivers`). Convert the cutscenes on a Windows PC first: they travel with the game folder.
+- **As AppImage** (Linux targets: the switch above the Build button). When it's on, the Linux build is one file, `WhiteRecomp-aarch64.AppImage`, in that folder (with a `README.txt`) instead of the program, its `.cfg` and `cdrive`. Copy the AppImage to the other computer, put (or link) your `FINAL FANTASY XIII` folder next to it, `chmod +x` it and run it. Saves go in `cdrive/` next to the AppImage. It needs FUSE there to open (`sudo apt install libfuse2`, or `libfuse2t64`), or start it with `--appimage-extract-and-run`. It's compressed when this computer has `mksquashfs` (squashfs-tools; Linux and macOS), else packed uncompressed (the Windows launcher always does that).
+- **Build for Android ARM64** makes `WhiteRecomp.apk` in the folder `WhiteRecomp-android-arm64` beside the launcher. No Android SDK or Java is needed: the launcher writes and signs the APK itself, with a key it makes the first time (`android_key.bin` and `android_cert.der` in its data folder; keep them, since Android installs an update over the app only when it's signed by the same key). Install the APK on the device, copy your `FINAL FANTASY XIII` folder to the device's internal storage (the `white_data/movie` folder can stay behind), start the app and allow access to your files. The folder's `README.txt` has the steps. This build has **no cutscenes yet** (they're skipped). It has **on-screen touch controls**: a d-pad, A, B, **0** (pause: the controller's Start) and **1** (select / skip: Back). They hide as soon as you use a game controller and come back when you touch the screen; a touch away from them works as the mouse. `XRC_TOUCH=0` in the device's `ff13.cfg` turns them off. A game controller, or a keyboard and mouse, work too. Some options are forced for phones whatever the Options tab says: 30 fps, 512 shadows (the lowest that keeps them), anti-aliasing off, effects at half resolution, 4 GB of memory, optimization level -O1 and 2 Pipeline Build Threads. The rest of the Options tab's options (resolution, sound, ...) are used as set and packed in the APK; an `ff13.cfg` in `Android/data/com.whiterecomp.ff13/files` on the device overrides them.
 
 ## What the download contains
 
@@ -227,7 +246,7 @@ The **Cross-Compile** tab builds the game for another kind of computer than the 
   - **The translated game code:** C source files generated from the game program and compiled on your computer.
   - **The runtime those sources run on:** C sources for memory, threads, files, graphics (Vulkan), sound and movies.
   - **FFmpeg's libraries** (libavformat, libavcodec, libswresample, libavutil; LGPL 2.1 or later), which the game is linked with to play the movies.
-  - **For the Cross-Compile tab:** Linux ARM64's system headers and libraries (from Ubuntu's packages) and FFmpeg's libraries for Linux ARM64.
+  - **For the Cross-Compile tab:** Linux ARM64's system headers and libraries (from Ubuntu's packages) and FFmpeg's libraries for Linux ARM64; Android's system headers and link libraries for API 29, Clang's runtime for ARM64 Android and the NativeActivity glue (from the Android NDK: Apache 2.0, BSD, the Linux headers' GPL-2.0 with the syscall exception; their `NOTICE` is extracted with them), and the APK's compiled manifest.
   - **On Windows, the movie converter:** a 32-bit Windows program.
   - **On Windows, the Steam achievements helper:** a small 32-bit Windows program that loads your install's own Steam files (`sgw.dll` and `steam_api.dll`), since the 64-bit game can't. Nothing of Valve's is included.
   - **On Windows, the FFmpeg program it encodes with** (`ffmpeg.exe`, GPL 3). It's a separate program; see `THIRD_PARTY_LICENSES.txt`.

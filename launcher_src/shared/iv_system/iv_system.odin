@@ -1,6 +1,6 @@
 // iv_system: windows, input and 2D rendering, in three packages that do not know each other:
 //
-//   iv_system/platform   the operating system's window and its events (Windows so far)
+//   iv_system/platform   the operating system's window and its events (Windows, Linux/Wayland, macOS)
 //   iv_system/ren        backend-agnostic 2D rendering (a draw list + a Backend interface)
 //   iv_system/ren/vulkan the Vulkan backend; ren/auto chooses between backends
 //

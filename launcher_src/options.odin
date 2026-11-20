@@ -1,5 +1,5 @@
 // The build options (the Options tab; kept in settings.txt) and what they make of the game's build:
-//   Compiler                  the C compiler (deps.odin finds them; Clang first: it makes the faster game)
+//   Compiler                  the C compiler (deps.odin finds them; Clang first: it makes the faster game; GCC on Linux too)
 //   Optimization Level        -O0 (the fastest build, the slowest game) .. -O3; 1 is the default
 //   Audio                     OFF: -DXRC_NO_AUDIO -- no sound output, no mixing, no movie audio thread, no XAudio2
 //                             (the game's own audio engine is a silent stand-in that only keeps its time)
@@ -15,9 +15,9 @@
 //   Gamepad Scanning          Once: -DXRC_PAD_ONCE -- the game controllers looked for once, at the start (else every 2
 //                             seconds, the default: the game asks that often; src/runtime/ref_dinput.c, hle_dinput.c)
 //   Cutscenes                 Auto-skip: -DXRC_SKIP_MOVIES (every movie skipped; the background conversion goes on)
-//   Cutscene Convert Threads  -DXRC_MOVIE_THREADS=N: the CPUs and encoder threads of the background conversion;
-//                             Convert Movies (movies.odin) runs the converter with as many (--threads N). Off: no
-//                             background conversion (XRC_MOVIE_NO_CONVERT=1 in WhiteRecomp.cfg, no Build needed);
+//   Cutscene Convert Threads  XRC_MOVIE_THREADS=N in WhiteRecomp.cfg (no Build needed): the CPUs and encoder threads
+//                             of the background conversion; Convert Movies (movies.odin) runs the converter with as
+//                             many (--threads N). Off: no background conversion (XRC_MOVIE_NO_CONVERT=1 there);
 //                             Convert Movies then uses 1
 //   Pipeline Build Threads    XRC_VK_PIPE_THREADS=N in WhiteRecomp.cfg (no Build needed): the threads that make the
 //                             renderer's pipelines in the background (vk_d3d9.c pj_threads); the default (Best) half
@@ -80,6 +80,30 @@ max_pipe_threads :: proc() -> int {return clamp(os.get_processor_core_count() - 
 best_pipe_threads :: proc() -> int {return clamp(os.get_processor_core_count() / 2, 1, 8)}
 pipe_threads :: proc() -> int {return settings.pipe_threads == 0 ? best_pipe_threads() : clamp(settings.pipe_threads, 1, max_pipe_threads())}
 
+// The options a Build uses: the player's, except for Android (the Cross-Compile tab's Android ARM64), where a phone's
+// are forced whatever the Options tab says -- the lowest graphics but shadows kept (512 shadows, anti-aliasing off,
+// effects at half resolution), 30 fps, 4 GB of memory, -O1 and 2 pipeline build threads (a phone's
+// few big cores go to the game). Resolution, sound and the rest stay the player's.
+ANDROID_SHADOW_RES :: 512
+ANDROID_FPS :: 30
+ANDROID_OPT_LEVEL :: 1
+ANDROID_PIPE_THREADS :: 2
+build_settings :: proc(spec: Build_Spec = {}) -> Settings {
+	s := settings
+	if spec.cross != nil && spec.cross.android {
+		s.graphics = GRAPHICS_CUSTOM
+		s.shadow_res = ANDROID_SHADOW_RES
+		s.aa_fxaa = true
+		s.aa_quality = 1
+		s.fx_full = false
+		s.fps = ANDROID_FPS
+		s.memory_2gb = false // (4 GB, whatever the Options tab says)
+		s.opt_level = ANDROID_OPT_LEVEL
+		s.pipe_threads = ANDROID_PIPE_THREADS
+	}
+	return s
+}
+
 // the flags of every unit (pages and runtime): the host CPU, fast math, LTO, no Linux hardening
 // (a cross build, cross.odin: the chosen CPU, and the target's no-hardening flags: ARM64 Linux has branch protection, not CET)
 common_flags :: proc(spec: Build_Spec = {}) -> []string {
@@ -87,13 +111,16 @@ common_flags :: proc(spec: Build_Spec = {}) -> []string {
 	if spec.cross != nil {
 		append(&f, fmt.tprintf("-mcpu=%s", spec.cpu))
 	} else {
-		when ODIN_ARCH == .amd64 {append(&f, "-march=native")} else {append(&f, "-mcpu=native")}
+		// (macOS: Apple's Clang may not know -mcpu=native; every Apple-silicon Mac runs the M1's instructions)
+		when ODIN_ARCH == .amd64 {append(&f, "-march=native")} else when ODIN_OS == .Darwin {append(&f, "-mcpu=apple-m1")} else {append(&f, "-mcpu=native")}
 	}
 	append(&f, "-ffast-math", "-fno-associative-math") // (reassociation folds the game's own rounding tricks: a broken title menu)
 	// (x86: no reciprocal estimates -- fast math would compute every packed divide as rcpps and a Newton step, a few
 	// ulp off and the CPU's own, x / 0 a NaN; tools/xrc_build.sh)
 	if spec.cross == nil && ODIN_ARCH == .amd64 {append(&f, "-mrecip=none")}
-	if spec.cross != nil {
+	if spec.cross != nil && spec.cross.android { 	// (a shared library: position-independent, only the activity's entry exported)
+		append(&f, "-fPIC", "-fvisibility=hidden", "-mbranch-protection=none", "-fno-stack-protector")
+	} else if spec.cross != nil {
 		append(&f, "-fno-pie", "-mbranch-protection=none", "-fno-stack-protector")
 	} else {
 		when ODIN_OS == .Linux {
@@ -108,9 +135,17 @@ common_flags :: proc(spec: Build_Spec = {}) -> []string {
 // the link's own: LTO (the optimization happens there), no PIE on Linux
 link_option_flags :: proc(spec: Build_Spec = {}) -> []string {
 	f := make([dynamic]string, context.temp_allocator)
+	if spec.cross != nil && spec.cross.android {
+		// (the app's libmain.so: 16 KB pages, nothing left undefined, the glue's entry kept, symbols stripped; the
+		// libraries -- Clang's runtime among them, by path: build_game.odin -- named outright: no default ones)
+		append(&f, "-shared", "-fuse-ld=lld", fmt.tprintf("--ld-path=%s", spec.lld), "-Wl,-z,max-page-size=16384", "-Wl,--no-undefined",
+		       "-u", "ANativeActivity_onCreate", "-nodefaultlibs", "-s")
+		if lto_on(spec) {append(&f, lto_flag(spec), fmt.tprintf("-O%d", clamp(build_settings(spec).opt_level, 0, 3)))}
+		return f[:]
+	}
 	if spec.cross != nil { 	// (always LLVM's linker: it links ELF on any computer)
 		append(&f, "-no-pie", "-fuse-ld=lld", fmt.tprintf("--ld-path=%s", spec.lld))
-		if lto_on(spec) {append(&f, lto_flag(spec), fmt.tprintf("-O%d", clamp(settings.opt_level, 0, 3)))}
+		if lto_on(spec) {append(&f, lto_flag(spec), fmt.tprintf("-O%d", clamp(build_settings(spec).opt_level, 0, 3)))}
 		return f[:]
 	}
 	when ODIN_OS == .Linux {append(&f, "-no-pie")}
@@ -160,7 +195,7 @@ lld_beside :: proc(cc: string) -> string {
 // the flags of the translated pages (gen/src, gen/match)
 page_option_flags :: proc(spec: Build_Spec = {}) -> []string {
 	f := make([dynamic]string, context.temp_allocator)
-	append(&f, fmt.tprintf("-O%d", clamp(settings.opt_level, 0, 3)))
+	append(&f, fmt.tprintf("-O%d", clamp(build_settings(spec).opt_level, 0, 3)))
 	append(&f, ..common_flags(spec))
 	append(&f, "-w", "-fno-strict-aliasing", "-fwrapv")
 	if spec.cross != nil || compiler_is_clang() {append(&f, "-fno-addrsig")}
@@ -170,17 +205,18 @@ page_option_flags :: proc(spec: Build_Spec = {}) -> []string {
 // the flags of the runtime (and xrc_table.c): the options as defines
 runtime_option_flags :: proc(spec: Build_Spec = {}) -> []string {
 	f := make([dynamic]string, context.temp_allocator)
-	append(&f, fmt.tprintf("-O%d", clamp(settings.opt_level, 0, 3)), "-w")
+	bs := build_settings(spec)
+	append(&f, fmt.tprintf("-O%d", clamp(bs.opt_level, 0, 3)), "-w")
 	append(&f, ..common_flags(spec))
 	if spec.cross != nil || compiler_is_clang() {append(&f, "-fno-addrsig")}
-	append(&f, fmt.tprintf("-DXRC_FRAME_LIMIT=%d", settings.fps == 30 ? 30 : 60))
+	append(&f, fmt.tprintf("-DXRC_FRAME_LIMIT=%d", bs.fps == 30 ? 30 : 60))
 	if !settings.audio {append(&f, "-DXRC_NO_AUDIO")}
 	if !settings.tools {append(&f, "-DXRC_NO_TOOLS")}
 	if !settings.vulkan && ODIN_OS == .Windows && spec.cross == nil {append(&f, "-DXRC_D3D9_DEFAULT")}
 	if settings.skip_movies {append(&f, "-DXRC_SKIP_MOVIES")}
+	if spec.cross != nil && spec.cross.android {append(&f, "-DXRC_NO_MOVIES")} // (no FFmpeg for Android yet)
 	if settings.pad_once {append(&f, "-DXRC_PAD_ONCE")}
 	if settings.experimental {append(&f, "-DXRC_EXPERIMENTAL")}
-	append(&f, fmt.tprintf("-DXRC_MOVIE_THREADS=%d", convert_threads()))
 	return f[:]
 }
 
@@ -230,11 +266,11 @@ graphics_matching :: proc() -> int {
 }
 
 // the game's arguments for the options (XRC_GAME_ARGS)
-game_args :: proc() -> string {
-	msaa := settings.aa_fxaa || settings.aa_quality <= 1 ? 0 : settings.aa_quality
-	args := fmt.tprintf("-Shadow=%d -MSAA=%d", settings.shadow_res == 0 ? 512 : settings.shadow_res, msaa)
+game_args :: proc(s: Settings = settings) -> string {
+	msaa := s.aa_fxaa || s.aa_quality <= 1 ? 0 : s.aa_quality
+	args := fmt.tprintf("-Shadow=%d -MSAA=%d", s.shadow_res == 0 ? 512 : s.shadow_res, msaa)
 	res := RESOLUTIONS
-	r := res[clamp(settings.resolution, 0, len(res) - 1)]
+	r := res[clamp(s.resolution, 0, len(res) - 1)]
 	if r.w != 1280 || r.h != 720 {args = fmt.tprintf("%s -Width=%d -Height=%d", args, r.w, r.h)}
 	return args
 }

@@ -13,3 +13,5 @@ bundle.bin
 *.o
 *.c
 *.h
+# local test builds of the launchers (not published)
+/builds/

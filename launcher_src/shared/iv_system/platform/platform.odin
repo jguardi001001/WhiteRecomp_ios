@@ -4,7 +4,7 @@ import input "../../iv_input"
 
 // ---------------------------------------------------------------------------
 // platform: windows and the events that come with them, for every operating system the same. The operating system's
-// part is in platform_<os>.odin (platform_windows.odin: Win32; platform_linux.odin: Wayland, with wayland_linux.odin and
+// part is in platform_<os>.odin (platform_windows.odin: Win32; platform_darwin.odin: Cocoa; platform_linux.odin: Wayland, with wayland_linux.odin and
 // xkb_linux.odin); this file is what is the same everywhere, including how the window's input events are handed to the
 // `input` package.
 //
@@ -33,8 +33,8 @@ Window_Flag :: enum u8 {
 	Maximized, // start maximized
 	Fullscreen, // start borderless fullscreen
 	Hidden, // created without showing it (tests, tools; set_visible shows it). Wayland has no hidden windows: a window appears when something is drawn into it
-	Always_On_Top, // above the other windows (Windows only: Wayland has no such thing)
-	No_Activate, // shown without taking the focus, behind the other windows (a program run by a test or a tool while someone works; Windows only)
+	Always_On_Top, // above the other windows (Windows and macOS: Wayland has no such thing)
+	No_Activate, // shown without taking the focus, behind the other windows (a program run by a test or a tool while someone works; Windows and macOS)
 }
 
 Window_Flags :: bit_set[Window_Flag;u8]
@@ -109,8 +109,8 @@ Window_Events :: bit_set[Window_Event;u8]
 
 // The operating system's own window handle, for whoever draws into the window (a graphics backend).
 Native_Handle :: struct {
-	window:  rawptr, // Windows: HWND
-	display: rawptr, // Windows: HINSTANCE
+	window:  rawptr, // Windows: HWND; Wayland: wl_surface; macOS: the CAMetalLayer of the window's view
+	display: rawptr, // Windows: HINSTANCE; Wayland: wl_display; macOS: the NSView
 }
 
 // What the window's input looked like, in order; feed_input replays it into the input package.

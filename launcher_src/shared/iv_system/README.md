@@ -2,8 +2,8 @@
 
 Windows, input and 2D rendering for Odin programs: Vulkan first, then OpenGL, then a CPU backend (the last two are not written yet). Part of the `shared`
 collection (`import iv "shared:iv_system"`). **Status:** the window layer (Windows, and Linux on Wayland), the renderer front end and the
-Vulkan backend work and are tested (a real swapchain, every draw call, render targets, textures). OpenGL, the CPU backend
-and a macOS platform layer are not written.
+Vulkan backend work and are tested (a real swapchain, every draw call, render targets, textures). A macOS window layer (Cocoa)
+and Vulkan through MoltenVK are written but only type-checked (no Mac to run them on yet). OpenGL and the CPU backend are not written.
 
 ```
 iv_system/
@@ -12,7 +12,8 @@ iv_system/
     platform.odin           what is the same everywhere: Window, events, feed_input
     platform_windows.odin   Win32
     platform_linux.odin     Wayland (xdg-shell, xdg-decoration), with wayland_linux.odin (protocol bindings)
-                            and xkb_linux.odin (layouts, text)          [macOS: platform_darwin.odin, later]
+                            and xkb_linux.odin (layouts, text)
+    platform_darwin.odin    Cocoa (AppKit), a CAMetalLayer per window: untested
   ren/                    backend-agnostic 2D rendering                               (package ren)
     types.odin              Color, Vertex, Command, Texture, Blend, Material
     draw_list.odin          the drawing calls: only record into a draw list
@@ -175,7 +176,8 @@ Needs Vulkan 1.3 (dynamic rendering, synchronization2). Loaded at run time; `pro
   `.Skipped`; a lost device returns `.Device_Lost` (destroy the renderer and make a new one).
 * **Limits:** at most 2048 textures (one descriptor set each); each buffer and image has its own memory allocation (a
   sub-allocator is the first thing to add if that matters); no read-back of the window itself (draw into a target and
-  `texture_read` it); `Native_Surface{kind = .None}` (headless) is not supported by this backend yet; surfaces: Win32 and Wayland.
+  `texture_read` it); `Native_Surface{kind = .None}` (headless) is not supported by this backend yet; surfaces: Win32, Wayland and (untested)
+  CAMetalLayer through MoltenVK.
 
 ## The seams that are still to be written
 
@@ -211,12 +213,37 @@ time; without them keys are positional, no text is typed and the cursor image is
 * **Tested** under weston's headless backend with Mesa's lavapipe (a software Vulkan), including the whole path
   window -> swapchain -> draw -> read back, and fullscreen and back with the swapchain following. See `tools/linux_check`.
 
+## macOS (Cocoa; untested)
+
+Written against Apple's documentation and Odin's bindings (`vendor:darwin/AppKit`, `vendor:darwin/QuartzCore`,
+`vendor:darwin/GameController`, `core:sys/darwin/*`) and only type-checked (`odin check -target:darwin_arm64` / `darwin_amd64`):
+nothing of it has run yet.
+
+* **The loop is the program's:** the first window sets NSApplication up (a regular app with a Dock icon, a menu bar with Hide and
+  Quit, finishLaunching) and `[NSApp run]` is never called. `poll` takes every waiting event (`nextEventMatchingMask` with a date in
+  the past), reads keys and mouse from it and hands it on (`sendEvent`); `wait_events` waits for one without taking it. Command+Q
+  and the Dock's Quit ask every window to close (`close_requested`), as the close button does.
+* **Windows:** an NSWindow subclass (so that one without a title bar can take the keyboard) whose content view hosts a
+  CAMetalLayer; `size` is in pixels (the view's points times `backingScaleFactor`, which is `dpi_scale`), and the layer's
+  `contentsScale` follows the factor. Fullscreen is the system's own (a Space of its own). Size, focus, scale, minimized and
+  zoomed are read back from the window after each poll.
+* **Input:** positional keys from `kVK_*` key codes, text from the event's characters (no IME, no marked text), the
+  trackpad's precise scrolling (a tenth of its points per wheel step), cursor shapes (NSCursor), the clipboard (NSPasteboard),
+  gamepads (GameController, the extended profile). The dialogs are NSOpenPanel / NSSavePanel / NSAlert; fonts come from
+  NSFontManager and Core Text. `run_program` and `begin_resize` do nothing (a borderless window is resized from its edges by
+  the system).
+* **Vulkan:** `ren/vulkan/ren_vulkan_darwin.odin` loads `$IV_VULKAN_LIB`, then `<exe>/../Frameworks/libMoltenVK.dylib` (what the
+  launcher's .app ships), `libvulkan.1.dylib` there, then the loader and MoltenVK where dyld, the LunarG SDK (/usr/local) and
+  Homebrew put them. The instance enables `VK_KHR_portability_enumeration` (when offered) and the device
+  `VK_KHR_portability_subset` (when the device has it); the surface is `VK_EXT_metal_surface`. The backend still needs Vulkan 1.3
+  with dynamic rendering, which needs a recent MoltenVK.
+
 ## What does not compile (on purpose)
 
 What is not written yet fails at compile time with a message, instead of quietly doing nothing:
 
 * **Unsupported operating systems:** `platform`, `ren/vulkan` and the `iv_system` glue have a `*_unsupported.odin` for every
-  OS but Windows and Linux (`#+build !windows` and `!linux`), which is a `#panic`: building for macOS or a BSD stops with
+  OS but Windows, Linux and macOS (`#+build !windows`, `!linux` and `!darwin`), which is a `#panic`: building for a BSD stops with
   "this operating system is not supported yet". (`ren`, `iv_ui` and `iv_input` are plain Odin and compile everywhere.)
 * **`ren/opengl` and `ren/software`:** the packages exist as placeholders that `#panic` when imported, with a comment on
   how each is to be written. They are not in `ren/auto`, and `ren.DEFAULT_ORDER` is `{.Vulkan}` for now (`ren.FULL_ORDER` is
@@ -225,8 +252,9 @@ What is not written yet fails at compile time with a message, instead of quietly
 
 ## Other operating systems
 
-* **macOS:** `platform_darwin.odin` (Cocoa through Odin's Objective-C intrinsics). OpenGL there is frozen at 4.1 and
-  Vulkan needs MoltenVK, so the real backend is Metal, which this design (a `Backend` interface) leaves room for.
+* **macOS:** written (see above), with Vulkan through MoltenVK. OpenGL there is frozen at 4.1 and Vulkan is a translation
+  layer, so the native backend would be Metal, which this design (a `Backend` interface) leaves room for (the window's
+  CAMetalLayer is already what `Native_Surface.window` is).
 * **Windows** has D3D11 as a more reliable middle step than OpenGL; it fits as another `Backend_Kind`.
 
 ## Known limits and decisions left

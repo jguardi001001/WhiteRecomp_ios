@@ -16,6 +16,12 @@ the converter; it is not linked with the launcher, the converter or the game).
   7. The Linux ARM64 system files the Cross-Compile tab links with (GNU C Library: LGPL 2.1 or later; Linux kernel
      headers: GPL 2 with the syscall note; GCC's libgcc: GPL 3 with the GCC Runtime Library Exception; OpenSSL:
      Apache 2.0; zlib: zlib license; Zstandard: BSD), and FFmpeg's libraries built for Linux ARM64 (as section 4)
+  8. macOS only: SDL2 (zlib license), appended at the end of this file in the macOS release
+  9. The Android ARM64 system files the Cross-Compile tab links with (the Android NDK's sysroot: BSD, Apache 2.0, the
+     Linux kernel headers' GPL 2 with the syscall note; LLVM's compiler-rt builtins: Apache 2.0 with LLVM Exceptions;
+     the NativeActivity glue: Apache 2.0)
+  10. The AppImage runtime, put in front of the AppImages the launcher makes (MIT license; it contains squashfuse:
+     BSD, libfuse 3: LGPL 2.1, and the zstd / zlib / xz / lz4 decompressors)
 
 
 --------------------------------------------------------------------------------------------------------------------
@@ -1449,3 +1455,53 @@ from the Go module github.com/belluikit/goffmpeg-libs/linux_arm64@v0.4.0 (h1:nIL
 configured with --arch=aarch64 --target-os=linux and otherwise as section 4 says. As there, you may relink the
 cross-built game with your own build: the objects stay in obj-linux_arm64 in the launcher's data folder.
 
+
+
+--------------------------------------------------------------------------------------------------------------------
+9. Android ARM64 system files (the Cross-Compile tab)
+--------------------------------------------------------------------------------------------------------------------
+
+The launchers carry what the Cross-Compile tab needs to build the game for Android on 64-bit ARM with any Clang and
+lld, unpacked when that Build runs to cross/android_arm64 in the launcher's data folder. They are unmodified files of
+the Android NDK r30 (30.0.16248370), only a subset of them:
+  sysroot/usr/include   the NDK sysroot's headers (Android's C library, bionic, and the NDK APIs: BSD and Apache
+                        License 2.0; the Linux kernel's UAPI headers: GNU General Public License 2 WITH
+                        Linux-syscall-note), without the other architectures' folders and C++'s
+  sysroot/usr/lib/aarch64-linux-android/29   the API 29 link stubs of libc, libm, libdl, libandroid, liblog and
+                        libaaudio (used only to link: the device's own libraries are loaded) and the start files
+                        crtbegin_so.o, crtend_so.o and crt_pad_segment.o (BSD), which the built game contains
+  sysroot/builtins      libclang_rt.builtins-aarch64-android.a, LLVM's compiler-rt (Apache License 2.0 with LLVM
+                        Exceptions: https://llvm.org/LICENSE.txt), parts of which the built game contains
+  sysroot/glue          android_native_app_glue.c and .h (Apache License 2.0), compiled into the built game
+The sysroot's own NOTICE file, with every license and copyright notice of those files, is unpacked with them
+(cross/android_arm64/sysroot/NOTICE). Source: https://android.googlesource.com (bionic, the NDK's
+sources/android/native_app_glue) and https://github.com/llvm/llvm-project (compiler-rt).
+The APK's compiled manifest and resource table (cross/android_arm64/apk) were made by the project with Android's aapt2
+from its own manifest, against the Android SDK's android.jar.
+
+
+10. AppImage runtime (the "As AppImage" switch)
+--------------------------------------------------------------------------------------------------------------------
+
+The launchers carry the AppImage type 2 runtime for x86-64 and ARM64 (https://github.com/AppImage/type2-runtime,
+release "continuous", unmodified), unpacked to appimage/ in the launcher's data folder and put at the front of every
+AppImage the launcher makes, which then contains it. MIT License:
+
+Copyright (c) 2004-23 probonopd
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The runtime is a static program that also contains squashfuse (BSD 2-Clause, https://github.com/vasi/squashfuse),
+libfuse 3 (GNU Lesser General Public License 2.1, https://github.com/libfuse/libfuse: its source is available there),
+and the zstd (BSD), zlib (zlib License), xz (public domain) and lz4 (BSD 2-Clause) decompressors.

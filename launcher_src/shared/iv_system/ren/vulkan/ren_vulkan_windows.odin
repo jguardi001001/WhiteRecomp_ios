@@ -5,8 +5,8 @@ import ren ".."
 
 // ---------------------------------------------------------------------------
 // The parts of the Vulkan backend that are different on each operating system: the name of the loader library, the
-// extension that makes surfaces for windows, and how a surface is made from a window. (Wayland and Cocoa/MoltenVK get
-// their own files later.)
+// extension that makes surfaces for windows, and how a surface is made from a window. (Wayland: ren_vulkan_linux.odin;
+// macOS, through MoltenVK: ren_vulkan_darwin.odin.)
 // ---------------------------------------------------------------------------
 
 LOADER_NAME :: "vulkan-1.dll"

@@ -2,12 +2,23 @@
 package launcher
 
 import "core:os"
+import "core:strings"
 import "core:sync"
 import "core:thread"
 
 // Starts the built game in its folder (its output: the launcher's); game_running until it ends.
 start_game :: proc(exe, dir: string) -> bool {
-	p, err := os.process_start({command = {exe}, working_dir = dir})
+	// (an AppImage opens itself through FUSE; without it, APPIMAGE_EXTRACT_AND_RUN has it unpack itself to /tmp first)
+	env: []string
+	if strings.has_suffix(exe, ".AppImage") && !os.exists("/dev/fuse") {
+		if cur, eerr := os.environ(context.temp_allocator); eerr == nil {
+			e := make([dynamic]string, context.temp_allocator)
+			append(&e, ..cur)
+			append(&e, "APPIMAGE_EXTRACT_AND_RUN=1")
+			env = e[:]
+		}
+	}
+	p, err := os.process_start({command = {exe}, working_dir = dir, env = env})
 	if err != nil {return false}
 	sync.atomic_store(&game_running, true)
 	thread.create_and_start_with_poly_data(p, proc(p: os.Process) {

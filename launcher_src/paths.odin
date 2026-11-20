@@ -36,6 +36,15 @@ init_paths :: proc() {
 	_ = os.make_directory_all(data_dir)
 }
 
+// macOS: the Frameworks folder of the launcher's .app (Contents/MacOS/<launcher> -> Contents/Frameworks), "" when it
+// does not run from one
+app_frameworks_dir :: proc() -> string {
+	d, err := os.get_executable_directory(context.temp_allocator)
+	if err != nil || filepath.base(d) != "MacOS" {return ""}
+	fw := pjoin({filepath.dir(d), "Frameworks"}, context.temp_allocator)
+	return os.is_dir(fw) ? fw : ""
+}
+
 data_path :: proc(parts: ..string) -> string {
 	all := make([dynamic]string, context.temp_allocator)
 	append(&all, data_dir)
@@ -96,6 +105,8 @@ Settings :: struct {
 	steam_off:       bool, // Steam Integration: Off (XRC_NO_STEAM=1 in the .cfg); else On, the default (host_steam.c; Windows, Linux)
 	cross_target:    string, // the Cross-Compile tab's Target (cross.odin: a Cross_Target key; "": the first)
 	cross_cpu:       string, // its CPU (-mcpu=; "": the target's first, generic)
+	appimage:        bool, // Home tab's "As AppImage" (Linux launchers): the game as WhiteRecomp-<arch>.AppImage (appimage.odin)
+	cross_appimage:  bool, // the Cross-Compile tab's, for its Linux targets
 }
 settings := Settings {
 	opt_level       = 1,
@@ -168,6 +179,10 @@ load_settings :: proc() {
 			settings.cross_target = strings.clone(v)
 		case "cross_cpu":
 			settings.cross_cpu = strings.clone(v)
+		case "appimage":
+			settings.appimage = v == "1"
+		case "cross_appimage":
+			settings.cross_appimage = v == "1"
 		case "msaa": // (before version 3: MSAA only; Off kept, any other the new default, FXAA 4x)
 			if version < 3 && n_ok && n == 0 {settings.aa_quality = 1}
 		case "aa_method":
@@ -217,5 +232,7 @@ save_settings :: proc() {
 	fmt.sbprintf(&b, "steam_off %d\n", settings.steam_off ? 1 : 0)
 	fmt.sbprintf(&b, "cross_target %s\n", settings.cross_target)
 	fmt.sbprintf(&b, "cross_cpu %s\n", settings.cross_cpu)
+	fmt.sbprintf(&b, "appimage %d\n", settings.appimage ? 1 : 0)
+	fmt.sbprintf(&b, "cross_appimage %d\n", settings.cross_appimage ? 1 : 0)
 	_ = os.write_entire_file(data_path("settings.txt"), b.buf[:])
 }

@@ -1,17 +1,20 @@
 #!/bin/sh
 # launcher/release.sh   -> dist/ff13-launcher-<platform>-<arch>.(zip | tar.gz)
 # Makes the release of the launcher for the system it runs on:
-#   WSL (Windows)  build/WhiteRecompLauncher_windows.exe (launcher/build.sh: packs launcher/bundle.bin with ff bundle first)
+#   WSL (Windows)  build/WhiteRecompLauncher_windows.exe (launcher/build.sh: packs launcher/bundle.bin with build/bundle.exe first)
 #                  -> dist/ff13-launcher-windows-x64.zip
 #   Linux          odin build (needs launcher/bundle.bin, made on Windows, and Odin's stb libraries built:
 #                  vendor/stb/src/build_stb.sh) -> dist/ff13-launcher-linux-x64.tar.gz
-#   macOS          odin build for arm64 and amd64, joined with lipo; "WhiteRecomp.app" with Info.plist and MoltenVK
-#                  (the launcher draws with Vulkan); signed with the hardened runtime, notarized and stapled
-#                  -> dist/ff13-launcher-macos.zip
+#   macOS          odin build for arm64 and amd64, joined with lipo; "WhiteRecomp.app" with Info.plist, MoltenVK (the
+#                  launcher draws with Vulkan, and so does the game it builds) and SDL2 (the game's window, controllers
+#                  and sound) in Contents/Frameworks; signed with the hardened runtime, notarized and stapled
+#                  -> dist/ff13-launcher-macos.zip. Its bundle: launcher/build.sh macos (on Windows/WSL) makes
+#                  build/bundle_macos.bin; BUNDLE=that file (default launcher/bundle.bin).
 # Every release holds the launcher (its packed bundle: the translated C sources, the runtime's C sources and the
 # Windows movie converter), README.md and THIRD_PARTY_LICENSES.txt (launcher/release/).
-# Env: ODIN (the compiler). macOS: MOLTENVK (path of libMoltenVK.dylib; default from $VULKAN_SDK), MOLTENVK_LICENSE
-# (its LICENSE file), MACOS_SIGN_ID ("Developer ID Application: ..."; unset: not signed), NOTARY_PROFILE (a
+# Env: ODIN (the compiler). macOS: BUNDLE, MOLTENVK (path of libMoltenVK.dylib; default from $VULKAN_SDK),
+# MOLTENVK_LICENSE (its LICENSE file), SDL2 (libSDL2-2.0.0.dylib; default Homebrew's -- for Intel Macs too it must hold
+# both architectures, e.g. lipo of an arm64 and an x86_64 build), SDL2_LICENSE (its LICENSE.txt), MACOS_SIGN_ID ("Developer ID Application: ..."; unset: not signed), NOTARY_PROFILE (a
 # `xcrun notarytool store-credentials` profile; unset: not notarized).
 set -eu
 cd "$(dirname "$0")/.."
@@ -47,29 +50,47 @@ Linux)
 	;;
 Darwin)
 	ODIN=${ODIN:-odin}
-	[ -f launcher/bundle.bin ] || { echo "launcher/bundle.bin is missing: make it on Windows (launcher/build.sh)"; exit 1; }
+	if [ -n "${BUNDLE:-}" ]; then cp "$BUNDLE" launcher/bundle.bin; fi
+	[ -f launcher/bundle.bin ] || { echo "launcher/bundle.bin is missing: make it on Windows (launcher/build.sh macos) and pass BUNDLE="; exit 1; }
 	MVK=${MOLTENVK:-${VULKAN_SDK:-/usr/local}/lib/libMoltenVK.dylib}
 	[ -f "$MVK" ] || { echo "MoltenVK not found ($MVK): install the Vulkan SDK or set MOLTENVK"; exit 1; }
 	MVK_LICENSE=${MOLTENVK_LICENSE:-${VULKAN_SDK:-/usr/local}/share/doc/MoltenVK/LICENSE}
 	[ -f "$MVK_LICENSE" ] || { echo "MoltenVK's LICENSE not found ($MVK_LICENSE): set MOLTENVK_LICENSE"; exit 1; }
+	BREW_SDL=$(brew --prefix sdl2 2>/dev/null || true)
+	SDL=${SDL2:-$BREW_SDL/lib/libSDL2-2.0.0.dylib}
+	[ -f "$SDL" ] || { echo "SDL2 not found ($SDL): brew install sdl2, or set SDL2"; exit 1; }
+	SDL_LICENSE=${SDL2_LICENSE:-$BREW_SDL/share/doc/sdl2/LICENSE.txt}
+	[ -f "$SDL_LICENSE" ] || SDL_LICENSE=$(ls "$BREW_SDL"/LICENSE* 2>/dev/null | head -1)
+	[ -f "$SDL_LICENSE" ] || { echo "SDL2's LICENSE.txt not found: set SDL2_LICENSE"; exit 1; }
+	# (the game a Mac builds is its own kind: an Intel Mac's needs the x86_64 half of each library)
+	for L in "$MVK" "$SDL"; do
+		case " $(lipo -archs "$L") " in *" x86_64 "*" arm64 "* | *" arm64 "*" x86_64 "*) ;;
+		*) echo "warning: $L is only $(lipo -archs "$L"): the game will not find it on the other kind of Mac" ;; esac
+	done
 	APP="dist/WhiteRecomp.app"
 	rm -rf "$APP" dist/ff13-launcher-macos.zip
 	mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
-	# one program for both kinds of Mac (the game it builds is x86-64 either way: Rosetta 2 on Apple silicon)
+	# one program for both kinds of Mac (each builds its own kind of game: ARM64 on Apple silicon, x86-64 on Intel)
 	"$ODIN" build launcher -collection:shared=shared -o:speed -target:darwin_arm64 -out:dist/ff13-launcher-arm64
 	"$ODIN" build launcher -collection:shared=shared -o:speed -target:darwin_amd64 -out:dist/ff13-launcher-amd64
 	lipo -create -output "$APP/Contents/MacOS/ff13-launcher" dist/ff13-launcher-arm64 dist/ff13-launcher-amd64
 	rm -f dist/ff13-launcher-arm64 dist/ff13-launcher-amd64
 	cp "$MVK" "$APP/Contents/Frameworks/libMoltenVK.dylib"
+	cp "$SDL" "$APP/Contents/Frameworks/libSDL2-2.0.0.dylib"
 	cp $REL/Info.plist "$APP/Contents/Info.plist"
 	cp $REL/README.md "$APP/Contents/Resources/"
 	{ cat $REL/THIRD_PARTY_LICENSES.txt
 	  printf '\n\n--------------------------------------------------------------------------------------------------------------------\n'
 	  printf '5. MoltenVK (https://github.com/KhronosGroup/MoltenVK)\n'
 	  printf -- '--------------------------------------------------------------------------------------------------------------------\n\n'
-	  cat "$MVK_LICENSE"; } > "$APP/Contents/Resources/THIRD_PARTY_LICENSES.txt"
+	  cat "$MVK_LICENSE"
+	  printf '\n\n--------------------------------------------------------------------------------------------------------------------\n'
+	  printf '8. SDL2 (https://www.libsdl.org)\n'
+	  printf -- '--------------------------------------------------------------------------------------------------------------------\n\n'
+	  cat "$SDL_LICENSE"; } > "$APP/Contents/Resources/THIRD_PARTY_LICENSES.txt"
 	if [ -n "${MACOS_SIGN_ID:-}" ]; then
 		codesign --force --timestamp --options runtime --sign "$MACOS_SIGN_ID" "$APP/Contents/Frameworks/libMoltenVK.dylib"
+		codesign --force --timestamp --options runtime --sign "$MACOS_SIGN_ID" "$APP/Contents/Frameworks/libSDL2-2.0.0.dylib"
 		codesign --force --timestamp --options runtime --sign "$MACOS_SIGN_ID" "$APP"
 		codesign --verify --strict --verbose=2 "$APP"
 	else

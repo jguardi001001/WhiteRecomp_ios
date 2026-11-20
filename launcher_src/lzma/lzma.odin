@@ -1,5 +1,5 @@
 // LZMA decoding (the "LZMA1" of 7-Zip and xz; the .lzma format that `xz --format=lzma` writes), for the launcher's
-// bundle (launcher/bundle.odin; tools/ff/bundle.odin and launcher/build.sh make it).
+// bundle (launcher/bundle.odin; tools/bundle/bundle.odin and launcher/build.sh make it).
 //
 // The whole output is one buffer whose size is known beforehand (the bundle's index has it), so the buffer is also the
 // dictionary: no window, a match is a copy from earlier in the output. Follows the LZMA specification's reference

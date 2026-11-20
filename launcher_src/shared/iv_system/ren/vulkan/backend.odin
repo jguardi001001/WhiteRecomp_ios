@@ -51,6 +51,7 @@ create :: proc(surface: ren.Native_Surface) -> (backend: ren.Backend, err: ren.C
 	}
 	s.physical = candidate.physical
 	s.queue_family = candidate.queue_family
+	s.api_version = candidate.api_version
 	vk.GetPhysicalDeviceMemoryProperties(s.physical, &s.memory_props)
 
 	if !create_logical_device(s) {
@@ -125,22 +126,67 @@ create_logical_device :: proc(s: ^State) -> bool {
 		dynamicRendering = true,
 		synchronization2 = true,
 	}
-	extensions := [?]cstring{vk.KHR_SWAPCHAIN_EXTENSION_NAME}
+	// Vulkan 1.2 (find_device checked the extensions): the same features from the extensions' own structures
+	old_api := s.api_version < vk.API_VERSION_1_3
+	dr := vk.PhysicalDeviceDynamicRenderingFeatures {
+		sType            = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
+		pNext            = &f12,
+		dynamicRendering = true,
+	}
+	s2 := vk.PhysicalDeviceSynchronization2Features {
+		sType            = .PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
+		pNext            = &dr,
+		synchronization2 = true,
+	}
+	extensions := make([dynamic]cstring, 0, 4, context.temp_allocator)
+	append(&extensions, cstring(vk.KHR_SWAPCHAIN_EXTENSION_NAME))
+	if old_api {
+		append(&extensions, cstring(vk.KHR_DYNAMIC_RENDERING_EXTENSION_NAME), cstring(vk.KHR_SYNCHRONIZATION_2_EXTENSION_NAME))
+	}
+	// a portability implementation (MoltenVK) says what it cannot do with VK_KHR_portability_subset, and the device must then
+	// enable it (a Vulkan rule; no ordinary driver offers it)
+	if device_has_extension(s.physical, vk.KHR_PORTABILITY_SUBSET_EXTENSION_NAME) {
+		append(&extensions, cstring(vk.KHR_PORTABILITY_SUBSET_EXTENSION_NAME))
+	}
 	info := vk.DeviceCreateInfo {
 		sType                   = .DEVICE_CREATE_INFO,
-		pNext                   = &features,
+		pNext                   = old_api ? rawptr(&s2) : rawptr(&features),
 		queueCreateInfoCount    = 1,
 		pQueueCreateInfos       = &queue_info,
 		enabledExtensionCount   = u32(len(extensions)),
-		ppEnabledExtensionNames = raw_data(extensions[:]),
+		ppEnabledExtensionNames = raw_data(extensions),
 	}
 	if res := vk.CreateDevice(s.physical, &info, nil, &s.device); res != .SUCCESS {
 		log.errorf("ren_vulkan: creating the device failed: %v", res)
 		return false
 	}
 	vk.load_proc_addresses_device(s.device)
+	if old_api {
+		// the core names the renderer calls, pointed at the extensions' entry points (the same signatures)
+		vk.CmdBeginRendering = transmute(vk.ProcCmdBeginRendering)vk.CmdBeginRenderingKHR
+		vk.CmdEndRendering = transmute(vk.ProcCmdEndRendering)vk.CmdEndRenderingKHR
+		vk.CmdPipelineBarrier2 = transmute(vk.ProcCmdPipelineBarrier2)vk.CmdPipelineBarrier2KHR
+		if vk.CmdBeginRendering == nil || vk.CmdEndRendering == nil || vk.CmdPipelineBarrier2 == nil {
+			log.errorf("ren_vulkan: the device lacks the dynamic rendering / synchronization2 entry points")
+			return false
+		}
+	}
 	vk.GetDeviceQueue(s.device, s.queue_family, 0, &s.queue)
 	return true
+}
+
+@(private = "file")
+device_has_extension :: proc(physical: vk.PhysicalDevice, name: string) -> bool {
+	count: u32
+	vk.EnumerateDeviceExtensionProperties(physical, nil, &count, nil)
+	props := make([]vk.ExtensionProperties, count, context.temp_allocator)
+	vk.EnumerateDeviceExtensionProperties(physical, nil, &count, raw_data(props))
+	for &p in props[:count] {
+		if string(cstring(&p.extensionName[0])) == name {
+			return true
+		}
+	}
+	return false
 }
 
 @(private = "file")

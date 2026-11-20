@@ -1,8 +1,9 @@
 // What the launcher needs on the computer, how it finds each, and how it installs what is missing.
-//   C compiler  builds the game from the bundled sources: clang only, on every system (on Windows a MinGW one, LLVM-MinGW
-//               or MSYS2's clang64: the runtime needs pthreads and the D3D9 import library; Visual C++ cannot build it
-//               yet). GCC is not taken: every build is the same compiler's, the one the game is tested with. Probed by compiling and running a
-//               small program, so a compiler that is there but cannot build this is not taken.
+//   C compiler  builds the game from the bundled sources: Clang (on Windows a MinGW one, LLVM-MinGW or MSYS2's clang64:
+//               the runtime needs pthreads and the D3D9 import library; Visual C++ cannot build it yet). On Linux GCC
+//               too, listed after Clang (the Options tab's choice; Clang stays the default); elsewhere GCC is not taken.
+//               Probed by compiling and running a small program, so a compiler that is there but cannot build this is
+//               not taken.
 //   FFmpeg      encodes the movies (Convert Movies: libx264 + aac). Playing them needs no FFmpeg program: the game
 //               links FFmpeg's libraries statically (third_party/ffmpeg, bundled)
 // Installs: Windows winget (per user: no administrator), Linux the distribution's package manager (always as
@@ -89,7 +90,11 @@ dep_set :: proc(k: Dep_Kind, d: Dep) {
 // ---------------------------------------------------------------------------------------------- the compiler
 PROBE_C :: `#include <pthread.h>
 #include <stdio.h>
+#if defined(__x86_64__)
 #include <xmmintrin.h>
+#else
+#include <arm_neon.h>
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #include <d3d9.h>
@@ -102,14 +107,23 @@ int main(void) {
 #ifdef _WIN32
 	if (!&Direct3DCreate9) return 2;
 #endif
+#if defined(__x86_64__)
 	printf("ok %d\n", (int)_mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(16.0f))));
+#else
+	printf("ok %d\n", (int)vgetq_lane_f32(vsqrtq_f32(vdupq_n_f32(16.0f)), 0));
+#endif
 	return 0;
 }
 `
 
-// the flags every compile of the game uses for the target (x86-64 only: the translation uses SSE)
-when ODIN_OS == .Darwin {
-	@(rodata) ARCH_FLAGS := []string{"-arch", "x86_64"} // (Apple silicon: built for Intel, run by Rosetta 2)
+// the flags every compile of the game uses for the target: macOS names the architecture (the launcher is one program
+// for both kinds of Mac, and each builds its own: Apple silicon a native ARM64 game, an Intel Mac an x86-64 one)
+when ODIN_OS == .Darwin && ODIN_ARCH == .arm64 {
+	@(rodata) ARCH_FLAGS := []string{"-arch", "arm64"}
+} else when ODIN_OS == .Darwin {
+	@(rodata) ARCH_FLAGS := []string{"-arch", "x86_64"}
+} else when ODIN_ARCH == .arm64 {
+	@(rodata) ARCH_FLAGS := []string{}
 } else {
 	@(rodata) ARCH_FLAGS := []string{"-m64"}
 }
@@ -130,6 +144,7 @@ when ODIN_OS == .Windows {
 }
 // a cross build's (cross.odin: Linux targets): FFmpeg's OpenSSL, and the game's own
 @(rodata) CROSS_LINUX_SYS_LIBS := []string{"-l:libssl.so.3", "-l:libcrypto.so.3", "-pthread", "-lm", "-ldl"}
+@(rodata) CROSS_ANDROID_SYS_LIBS := []string{"-landroid", "-llog", "-laaudio", "-lm", "-ldl", "-lc"}
 arch_flags :: proc() -> []string {return ARCH_FLAGS}
 link_libs :: proc() -> []string {return LINK_LIBS}
 
@@ -157,7 +172,12 @@ compiler_candidates :: proc() -> [dynamic]string {
 			if file_exists(p) {append(&c, p)}
 		}
 	} else {
-		for n in ([]string{"clang", "cc"}) {add(&c, find_program(n))} // (cc: macOS's is clang; a GCC one is left out below)
+		// (cc: macOS's is clang; a GCC one is taken on Linux only, below)
+		when ODIN_OS == .Linux {
+			for n in ([]string{"clang", "gcc", "cc"}) {add(&c, find_program(n))}
+		} else {
+			for n in ([]string{"clang", "cc"}) {add(&c, find_program(n))}
+		}
 	}
 	return c
 }
@@ -215,14 +235,25 @@ check_compiler :: proc(t: ^Task) -> Dep {
 		_, _, key_v := strings.partition(v, " ")
 		if key_v != "" && key_v in versions {continue}
 		versions[strings.clone(key_v, context.temp_allocator)] = true
-		if !strings.contains(v, "clang") {
-			append(&tried, fmt.tprintf("%s: GCC (the game is built with Clang only)", filepath.base(cc)))
-			continue
+		is_clang := strings.contains(v, "clang")
+		when ODIN_OS != .Linux {
+			if !is_clang {
+				append(&tried, fmt.tprintf("%s: GCC (the game is built with Clang here)", filepath.base(cc)))
+				continue
+			}
 		}
-		append(&found, Compiler{path = strings.clone(cc), clang = strings.contains(v, "clang")})
+		append(&found, Compiler{path = strings.clone(cc), clang = is_clang})
 	}
 	if len(found) > 0 {
-		for &c in found {c.label = len(found) > 1 ? fmt.aprintf("Clang — %s", c.path) : strings.clone("Clang")}
+		// Clang first (the default: it makes the faster game), then GCC (Linux); a kind found twice shows its path
+		slice.stable_sort_by(found[:], proc(a, b: Compiler) -> bool {return a.clang && !b.clang})
+		nclang := 0
+		for c in found {if c.clang {nclang += 1}}
+		for &c in found {
+			n := c.clang ? nclang : len(found) - nclang
+			kind := c.clang ? "Clang" : "GCC"
+			c.label = n > 1 ? fmt.aprintf("%s — %s", kind, c.path) : strings.clone(kind)
+		}
 		sync.mutex_lock(&deps_mutex)
 		compilers = found
 		sync.mutex_unlock(&deps_mutex)

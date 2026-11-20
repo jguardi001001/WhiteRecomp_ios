@@ -1,4 +1,4 @@
-// The sources the launcher carries: launcher/bundle.bin, made by `ff bundle` (tools/ff/bundle.odin has the format),
+// The sources the launcher carries: launcher/bundle.bin, made by build/bundle.exe (tools/bundle/bundle.odin has the format),
 // embedded at compile time. What is in it: the translated code (gen/src/page_*.c, gen/xrc_table.c), the runtime
 // (runtime/), its header (include/xrc.h), the Steam achievements helper (tools/steamhelper.exe) and the movie converter
 // (tools/bink2mp4.exe; Windows: with the ffmpeg.exe it
@@ -119,6 +119,18 @@ bundle_extract :: proc(t: ^Task, dir: string, prefixes: []string) -> int {
 			}
 		}
 	}
+	// every folder made here first: the workers creating the same folder at once failed now and then (one of them saw
+	// it half made, and its file could not be written)
+	{
+		context.allocator = context.temp_allocator // (the folder names: filepath.dir allocates)
+		made := make(map[string]bool)
+		for e in sel {
+			d := filepath.dir(pjoin({dir, e.path}))
+			if d in made {continue}
+			made[d] = true
+			_ = os.make_directory_all(d)
+		}
+	}
 	// (the biggest blocks first: the last one to finish is a small one)
 	slice.sort_by(blocks[:], proc(a, b: u32) -> bool {return bundle_blocks[a].size > bundle_blocks[b].size})
 	job := Job{t = t, dir = dir, sel = sel[:], blocks = blocks[:]}
@@ -138,8 +150,12 @@ bundle_extract :: proc(t: ^Task, dir: string, prefixes: []string) -> int {
 					same := rerr == nil && len(old) == len(data) && string(old) == string(data)
 					delete(old)
 					if !same {
-						_ = os.make_directory_all(filepath.dir(dst))
-						if os.write_entire_file(dst, data) != nil {
+						werr := os.write_entire_file(dst, data)
+						if werr != nil { 	// (its folder made again, once)
+							_ = os.make_directory_all(filepath.dir(dst))
+							werr = os.write_entire_file(dst, data)
+						}
+						if werr != nil {
 							ok = false
 						} else {
 							when ODIN_OS != .Windows {

@@ -75,6 +75,11 @@ no_sources "$REPO"
 cat > "$REPO/launcher_src/README.md" <<'MD'
 # WhiteRecomp launcher sources
 
+> **Playing the game? You don't need anything in this folder.** Download the launcher for your system from the
+> [Releases page](https://github.com/ps4star/WhiteRecomp/releases) (Linux ARM64, e.g. a Raspberry Pi:
+> `WhiteRecompLauncher_linux_arm64`), run it, and press **Build**: that compiles the game on your own computer.
+> The scripts here build the launchers themselves, on the maintainer's Windows PC (WSL); they cannot run elsewhere.
+
 The launcher (Odin): `*.odin` here, with the `iv_*` libraries of `shared/` as the `shared` collection.
 
 It is built inside the ff13decomp2 project (it lives there as `launcher/`), because what the launcher
@@ -86,7 +91,7 @@ converter -- comes from that project's build:
     sh launcher/publish.sh        # copies these sources into this repo
     sh launcher/publish.sh release vX.Y.Z   # (after committing and pushing) uploads the launchers to a GitHub release
 
-`bundle.bin` is not in this repo (it is made per target by `ff bundle`, and is embedded in the launchers).
+`bundle.bin` is not in this repo (it is made per target by `tools/bundle`, and is embedded in the launchers).
 The launchers are on the repo's GitHub Releases, not in the repo.
 MD
 cat > "$REPO/.gitignore" <<'GI'
@@ -105,6 +110,8 @@ bundle.bin
 *.o
 *.c
 *.h
+# local test builds of the launchers (not published)
+/builds/
 GI
 cat > "$REPO/.gitattributes" <<'GA'
 *.exe binary

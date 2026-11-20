@@ -1,4 +1,5 @@
-// Choosing the game's folder (Home's Browse…). Windows: its own folder dialog (iv_system). Linux: iv_system has no
+// Choosing the game's folder (Home's Browse…). Windows: its own folder dialog (iv_system). macOS: Finder's, through
+// osascript (AppleScript's choose folder). Linux: iv_system has no
 // dialog there yet, so the desktop's own, through the program it has for scripts -- zenity (GNOME), kdialog (KDE) or
 // yad -- run on a thread of its own (the window keeps drawing); without any of them, a folder browser in the launcher:
 // the folders of one place at a time, with shortcuts (home, /, the Windows drives under WSL), and the game's folder
@@ -64,10 +65,17 @@ use_game_folder :: proc(p: string) {
 @(private = "file")
 desktop_folder_dialog :: proc() -> (path: string, has_tool: bool) {
 	start := settings.game_dir != "" ? settings.game_dir : os.get_env("HOME", context.temp_allocator)
-	tools := [][]string {
+	when ODIN_OS == .Darwin { 	// (macOS: Finder's own folder dialog, through AppleScript)
+		q, _ := strings.replace_all(start, `\`, `\\`, context.temp_allocator) // (inside an AppleScript string)
+		q, _ = strings.replace_all(q, `"`, `\"`, context.temp_allocator)
+		script := strings.concatenate({`POSIX path of (choose folder with prompt "Choose the FINAL FANTASY XIII folder" default location POSIX file "`, q, `")`}, context.temp_allocator)
+		tools := [][]string{{"/usr/bin/osascript", "-e", script}}
+	} else {
+		tools := [][]string {
 		{"zenity", "--file-selection", "--directory", "--title=Choose the FINAL FANTASY XIII folder", strings.concatenate({"--filename=", start, "/"}, context.temp_allocator)},
 		{"kdialog", "--getexistingdirectory", start, "--title", "Choose the FINAL FANTASY XIII folder"},
 		{"yad", "--file", "--directory", "--title=Choose the FINAL FANTASY XIII folder"},
+		}
 	}
 	for t in tools {
 		prog := find_program(t[0])
@@ -84,7 +92,15 @@ desktop_folder_dialog :: proc() -> (path: string, has_tool: bool) {
 			strings.write_bytes(&out, buf[:n])
 		}
 		code := child_wait(c, r)
-		p := strings.trim_space(strings.to_string(out))
+		// (stderr shares the pipe: GTK and the like print warnings there -- "Gtk-WARNING **: Unable to acquire the
+		// address of the accessibility bus" -- so the answer is the last line that is an existing absolute folder)
+		p := ""
+		text := strings.to_string(out)
+		for line in strings.split_lines_iterator(&text) {
+			l := strings.trim_space(line)
+			if len(l) > 1 {l = strings.trim_suffix(l, "/")} // (AppleScript's folder paths end in /)
+			if strings.has_prefix(l, "/") && dir_exists(l) {p = l}
+		}
 		return code == 0 && p != "" ? strings.clone(p) : "", true
 	}
 	return "", false

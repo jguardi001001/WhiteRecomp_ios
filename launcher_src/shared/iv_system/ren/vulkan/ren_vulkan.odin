@@ -49,7 +49,13 @@ load_loader :: proc() -> bool {
 		return false
 	case .Untried:
 	}
-	lib, ok := dynlib.load_library(LOADER_NAME)
+	lib: dynlib.Library
+	ok: bool
+	when ODIN_OS == .Darwin {
+		lib, ok = open_loader() // (several places to look: ren_vulkan_darwin.odin)
+	} else {
+		lib, ok = dynlib.load_library(LOADER_NAME)
+	}
 	if !ok {
 		loader_state = .Missing
 		return false
@@ -83,8 +89,10 @@ create_instance :: proc() -> (instance: vk.Instance, reason: string) {
 	if vk.EnumerateInstanceVersion == nil || vk.EnumerateInstanceVersion(&version) != .SUCCESS {
 		return nil, "the Vulkan loader is older than 1.1"
 	}
-	if version < vk.API_VERSION_1_3 {
-		return nil, fmt.tprintf("the Vulkan loader is %d.%d, 1.3 is needed", vk.API_VERSION_MAJOR(version), vk.API_VERSION_MINOR(version))
+	// (1.2 is enough: a 1.2 device with VK_KHR_dynamic_rendering and VK_KHR_synchronization2 does, as MoltenVK before
+	// its 1.3 releases and older Mesa drivers have. The instance still asks for 1.3: a 1.1+ loader takes a newer apiVersion)
+	if version < vk.API_VERSION_1_2 {
+		return nil, fmt.tprintf("the Vulkan loader is %d.%d, 1.2 is needed", vk.API_VERSION_MAJOR(version), vk.API_VERSION_MINOR(version))
 	}
 	app := vk.ApplicationInfo {
 		sType              = .APPLICATION_INFO,
@@ -94,18 +102,64 @@ create_instance :: proc() -> (instance: vk.Instance, reason: string) {
 		engineVersion      = 1,
 		apiVersion         = vk.API_VERSION_1_3,
 	}
-	extensions := [?]cstring{vk.KHR_SURFACE_EXTENSION_NAME, SURFACE_EXTENSION}
+	extensions := make([dynamic]cstring, 0, 4, context.temp_allocator)
+	append(&extensions, cstring(vk.KHR_SURFACE_EXTENSION_NAME), SURFACE_EXTENSION)
+	flags: vk.InstanceCreateFlags
+	when PORTABILITY {
+		// a portability implementation (MoltenVK) is only listed to an instance that says it knows what that is
+		if instance_has_extension(vk.KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) {
+			append(&extensions, cstring(vk.KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME))
+			flags += {.ENUMERATE_PORTABILITY_KHR}
+		}
+	}
 	info := vk.InstanceCreateInfo {
 		sType                   = .INSTANCE_CREATE_INFO,
+		flags                   = flags,
 		pApplicationInfo        = &app,
 		enabledExtensionCount   = u32(len(extensions)),
-		ppEnabledExtensionNames = raw_data(extensions[:]),
+		ppEnabledExtensionNames = raw_data(extensions),
 	}
 	if res := vk.CreateInstance(&info, nil, &instance); res != .SUCCESS {
 		return nil, fmt.tprintf("vkCreateInstance failed: %v", res)
 	}
 	vk.load_proc_addresses_instance(instance)
 	return instance, ""
+}
+
+// Vulkan on a system without a native driver is a portability implementation (MoltenVK on macOS): the instance asks for it
+// with VK_KHR_portability_enumeration. Elsewhere nothing changes.
+PORTABILITY :: ODIN_OS == .Darwin
+
+// Does the device offer this extension?
+@(private)
+physical_has_extension :: proc(physical: vk.PhysicalDevice, name: string) -> bool {
+	count: u32
+	vk.EnumerateDeviceExtensionProperties(physical, nil, &count, nil)
+	props := make([]vk.ExtensionProperties, count, context.temp_allocator)
+	vk.EnumerateDeviceExtensionProperties(physical, nil, &count, raw_data(props))
+	for &p in props[:count] {
+		if string(cstring(&p.extensionName[0])) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Does the loader (or the implementation, when there is no loader) offer this instance extension?
+@(private)
+instance_has_extension :: proc(name: string) -> bool {
+	count: u32
+	if vk.EnumerateInstanceExtensionProperties == nil || vk.EnumerateInstanceExtensionProperties(nil, &count, nil) != .SUCCESS {
+		return false
+	}
+	props := make([]vk.ExtensionProperties, count, context.temp_allocator)
+	vk.EnumerateInstanceExtensionProperties(nil, &count, raw_data(props))
+	for &p in props[:count] {
+		if string(cstring(&p.extensionName[0])) == name {
+			return true
+		}
+	}
+	return false
 }
 
 // The best device that can do what the backend needs: Vulkan 1.3 with dynamic rendering, a queue that draws and presents
@@ -127,21 +181,41 @@ find_device :: proc(instance: vk.Instance, surface: vk.SurfaceKHR = 0) -> (best:
 		vk.GetPhysicalDeviceProperties(physical, &props)
 		name := strings.clone(string(cstring(&props.deviceName[0])), context.temp_allocator)
 
-		if props.apiVersion < vk.API_VERSION_1_3 {
-			reason = fmt.tprintf("%s: Vulkan %d.%d, 1.3 is needed", name, vk.API_VERSION_MAJOR(props.apiVersion), vk.API_VERSION_MINOR(props.apiVersion))
+		if props.apiVersion < vk.API_VERSION_1_2 {
+			reason = fmt.tprintf("%s: Vulkan %d.%d, 1.2 is needed", name, vk.API_VERSION_MAJOR(props.apiVersion), vk.API_VERSION_MINOR(props.apiVersion))
 			continue
 		}
 
-		f13 := vk.PhysicalDeviceVulkan13Features {
-			sType = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+		dyn_ok, sync2_ok: bool
+		if props.apiVersion >= vk.API_VERSION_1_3 {
+			f13 := vk.PhysicalDeviceVulkan13Features {
+				sType = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+			}
+			f2 := vk.PhysicalDeviceFeatures2 {
+				sType = .PHYSICAL_DEVICE_FEATURES_2,
+				pNext = &f13,
+			}
+			vk.GetPhysicalDeviceFeatures2(physical, &f2)
+			dyn_ok, sync2_ok = bool(f13.dynamicRendering), bool(f13.synchronization2)
+		} else if physical_has_extension(physical, vk.KHR_DYNAMIC_RENDERING_EXTENSION_NAME) &&
+		   physical_has_extension(physical, vk.KHR_SYNCHRONIZATION_2_EXTENSION_NAME) {
+			// Vulkan 1.2: the same two as extensions (backend.odin enables them and calls their KHR entry points)
+			dr := vk.PhysicalDeviceDynamicRenderingFeatures {
+				sType = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
+			}
+			s2 := vk.PhysicalDeviceSynchronization2Features {
+				sType = .PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
+				pNext = &dr,
+			}
+			f2 := vk.PhysicalDeviceFeatures2 {
+				sType = .PHYSICAL_DEVICE_FEATURES_2,
+				pNext = &s2,
+			}
+			vk.GetPhysicalDeviceFeatures2(physical, &f2)
+			dyn_ok, sync2_ok = bool(dr.dynamicRendering), bool(s2.synchronization2)
 		}
-		f2 := vk.PhysicalDeviceFeatures2 {
-			sType = .PHYSICAL_DEVICE_FEATURES_2,
-			pNext = &f13,
-		}
-		vk.GetPhysicalDeviceFeatures2(physical, &f2)
-		if !f13.dynamicRendering || !f13.synchronization2 {
-			reason = fmt.tprintf("%s: no dynamic rendering / synchronization2", name)
+		if !dyn_ok || !sync2_ok {
+			reason = fmt.tprintf("%s: Vulkan %d.%d without dynamic rendering / synchronization2", name, vk.API_VERSION_MAJOR(props.apiVersion), vk.API_VERSION_MINOR(props.apiVersion))
 			continue
 		}
 
