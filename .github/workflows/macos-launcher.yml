@@ -23,7 +23,7 @@ env:
   TAG: ${{ inputs.tag }}
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest # (Apple silicon; a pinned version stops working when GitHub retires it)
     steps:
       - uses: actions/checkout@v4
         with:
