@@ -22,6 +22,8 @@ the converter; it is not linked with the launcher, the converter or the game).
      the NativeActivity glue: Apache 2.0)
   10. The AppImage runtime, put in front of the AppImages the launcher makes (MIT license; it contains squashfuse:
      BSD, libfuse 3: LGPL 2.1, and the zstd / zlib / xz / lz4 decompressors)
+  11. Android builds of the game: the touch controls' font, KenVector Future by Kenney (www.kenney.nl), CC0 1.0 (public
+     domain: no conditions), drawn with stb_truetype (see 2)
 
 
 --------------------------------------------------------------------------------------------------------------------

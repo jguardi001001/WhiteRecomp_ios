@@ -4,8 +4,8 @@ import input "../../iv_input"
 
 // ---------------------------------------------------------------------------
 // platform: windows and the events that come with them, for every operating system the same. The operating system's
-// part is in platform_<os>.odin (platform_windows.odin: Win32; platform_darwin.odin: Cocoa; platform_linux.odin: Wayland, with wayland_linux.odin and
-// xkb_linux.odin); this file is what is the same everywhere, including how the window's input events are handed to the
+// part is in platform_<os>.odin (platform_windows.odin: Win32; Linux and macOS: platform_sdl.odin, SDL2, with the dialogs and
+// fonts in platform_linux.odin / platform_darwin.odin); this file is what is the same everywhere, including how the window's input events are handed to the
 // `input` package.
 //
 // What every platform file provides: create_window, destroy_window, recreate_window, poll, set_title, set_fullscreen,
@@ -107,10 +107,20 @@ Window_Event :: enum u8 {
 
 Window_Events :: bit_set[Window_Event;u8]
 
-// The operating system's own window handle, for whoever draws into the window (a graphics backend).
+// The window system a Native_Handle belongs to.
+Native_Kind :: enum u8 {
+	Win32,
+	Wayland,
+	X11,
+	Cocoa,
+}
+
+// The operating system's own window handle, for whoever draws into the window (a graphics backend). Both nil: none
+// (the window system is not one a backend knows).
 Native_Handle :: struct {
-	window:  rawptr, // Windows: HWND; Wayland: wl_surface; macOS: the CAMetalLayer of the window's view
-	display: rawptr, // Windows: HINSTANCE; Wayland: wl_display; macOS: the NSView
+	kind:    Native_Kind,
+	window:  rawptr, // Windows: HWND; Wayland: wl_surface; X11: the Window (an XID); macOS: the CAMetalLayer of the window's view
+	display: rawptr, // Windows: HINSTANCE; Wayland: wl_display; X11: the Display*; macOS: the NSView
 }
 
 // What the window's input looked like, in order; feed_input replays it into the input package.

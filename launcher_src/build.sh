@@ -122,7 +122,7 @@ for T in $TARGETS; do
 		rm -f "$STAGE/whiterecomp_linux.o"
 		(cd "$STAGE" && "$ODIN" build launcher -out:whiterecomp_linux.o -collection:shared=shared -target:linux_amd64 -build-mode:obj -o:speed "$@") || exit 1
 		$XCC -o build/WhiteRecompLauncher_linux "$STAGE/whiterecomp_linux.o" "$STB/stb_truetype.a" "$STB/stb_rect_pack.a" "$STB/stb_image.a" \
-			-l:libwayland-client.so.0 -lm -ldl -lpthread || exit 1
+			-lm -ldl -lpthread || exit 1
 		glibc_check build/WhiteRecompLauncher_linux
 		ls -la build/WhiteRecompLauncher_linux
 		;;
@@ -151,7 +151,7 @@ for T in $TARGETS; do
 		rm -f "$STAGE/whiterecomp_linux_arm64.o"
 		(cd "$STAGE" && "$ODIN" build launcher -out:whiterecomp_linux_arm64.o -collection:shared=shared -target:linux_arm64 -build-mode:obj -o:speed "$@") || exit 1
 		$XLD -o build/WhiteRecompLauncher_linux_arm64 "$STAGE/whiterecomp_linux_arm64.o" "$STB/stb_truetype.a" "$STB/stb_rect_pack.a" "$STB/stb_image.a" \
-			-l:libwayland-client.so.0 -lm -ldl -lpthread || exit 1
+			-lm -ldl -lpthread || exit 1
 		glibc_check build/WhiteRecompLauncher_linux_arm64
 		ls -la build/WhiteRecompLauncher_linux_arm64
 		;;

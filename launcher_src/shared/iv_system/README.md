@@ -1,9 +1,10 @@
 # iv_system
 
 Windows, input and 2D rendering for Odin programs: Vulkan first, then OpenGL, then a CPU backend (the last two are not written yet). Part of the `shared`
-collection (`import iv "shared:iv_system"`). **Status:** the window layer (Windows, and Linux on Wayland), the renderer front end and the
-Vulkan backend work and are tested (a real swapchain, every draw call, render targets, textures). A macOS window layer (Cocoa)
-and Vulkan through MoltenVK are written but only type-checked (no Mac to run them on yet). OpenGL and the CPU backend are not written.
+collection (`import iv "shared:iv_system"`). **Status:** the window layer (Windows: Win32; Linux and macOS: SDL2, loaded at run
+time), the renderer front end and the Vulkan backend work and are tested on Windows and Linux (Wayland and X11; a real swapchain,
+every draw call, render targets, textures). macOS (SDL2 with a Metal view, Vulkan through MoltenVK) is only type-checked (no Mac to
+run it on yet). OpenGL and the CPU backend are not written.
 
 ```
 iv_system/
@@ -11,9 +12,11 @@ iv_system/
   platform/               the operating system's window and events                    (package platform)
     platform.odin           what is the same everywhere: Window, events, feed_input
     platform_windows.odin   Win32
-    platform_linux.odin     Wayland (xdg-shell, xdg-decoration), with wayland_linux.odin (protocol bindings)
-                            and xkb_linux.odin (layouts, text)
-    platform_darwin.odin    Cocoa (AppKit), a CAMetalLayer per window: untested
+    sdl2.odin               SDL2, loaded at run time (Linux, macOS): only what platform_sdl.odin uses
+    platform_sdl.odin       Linux and macOS: windows, events, keys, text, cursor, clipboard, gamepads through SDL2;
+                            the renderer gets Wayland / X11 handles, or a CAMetalLayer (SDL's Metal view) on macOS
+    platform_linux.odin     what SDL does not do on Linux (dialogs, fonts): not done yet, reported as "cancelled"
+    platform_darwin.odin    what SDL does not do on macOS: NSOpenPanel / NSSavePanel, NSAlert, the Finder, fonts: untested
   ren/                    backend-agnostic 2D rendering                               (package ren)
     types.odin              Color, Vertex, Command, Texture, Blend, Material
     draw_list.odin          the drawing calls: only record into a draw list
@@ -110,13 +113,13 @@ a computer without Vulkan still starts the program.
   `maximize` / `restore` / `minimize` / `toggle_maximize`, and `Window.maximized` says where it is. A window without decorations draws its own
   title bar: `set_hit_test(w, proc(w, x, y, user) -> Hit_Region, user)` tells Windows which part is the caption (`.Caption`: drag to move, double click
   to maximize, snap, the system menu on a right click) and the resize handles along the edges are answered by `platform` itself; `request_close`
-  closes it as the close button would. On Wayland there is no hit test (the program calls `begin_move` when the button goes down on its title bar).
-* **Platform additions:** clipboard (`clipboard_text`, `set_clipboard_text`; process-local on Wayland until wl_data_device is done),
+  closes it as the close button would. On Linux and macOS SDL asks the hit test (SDL_SetWindowHitTest); `begin_move` / `begin_resize` do nothing there.
+* **Platform additions:** clipboard (`clipboard_text`, `set_clipboard_text`),
   `pick_folder` and `pick_save_file` (the system's folder and save dialogs, blocking; full Explorer windows on Windows (`IFileOpenDialog` with `FOS_PICKFOLDERS`, `IFileSaveDialog`),
-  not done on Wayland: they report "cancelled"), the system's fonts (`list_font_families`, `font_data`: a family's bytes by name, from
+  not done on Linux: they report "cancelled"), the system's fonts (`list_font_families`, `font_data`: a family's bytes by name, from
   GDI on Windows; not done on Linux yet),
-  cursor visibility and shape, `set_mouse_position` (not on Wayland), `set_visible`, `maximize`, `mouse_inside`, and gamepads
-  (`read_gamepads` / `feed_input`: XInput on Windows; `/dev/input/js*` on Linux, untested without a pad, xpad layout assumed).
+  cursor visibility and shape, `set_mouse_position`, `set_visible`, `maximize`, `mouse_inside`, and gamepads
+  (`read_gamepads` / `feed_input`: XInput on Windows; SDL's game controllers on Linux and macOS).
 
 ## Batteries included: ren/assets (package `ren_assets`)
 
@@ -176,8 +179,8 @@ Needs Vulkan 1.3 (dynamic rendering, synchronization2). Loaded at run time; `pro
   `.Skipped`; a lost device returns `.Device_Lost` (destroy the renderer and make a new one).
 * **Limits:** at most 2048 textures (one descriptor set each); each buffer and image has its own memory allocation (a
   sub-allocator is the first thing to add if that matters); no read-back of the window itself (draw into a target and
-  `texture_read` it); `Native_Surface{kind = .None}` (headless) is not supported by this backend yet; surfaces: Win32, Wayland and (untested)
-  CAMetalLayer through MoltenVK.
+  `texture_read` it); `Native_Surface{kind = .None}` (headless) is not supported by this backend yet; surfaces: Win32, Wayland, X11 (Xlib)
+  and (untested) CAMetalLayer through MoltenVK.
 
 ## The seams that are still to be written
 

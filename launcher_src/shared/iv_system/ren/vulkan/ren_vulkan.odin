@@ -103,7 +103,12 @@ create_instance :: proc() -> (instance: vk.Instance, reason: string) {
 		apiVersion         = vk.API_VERSION_1_3,
 	}
 	extensions := make([dynamic]cstring, 0, 4, context.temp_allocator)
-	append(&extensions, cstring(vk.KHR_SURFACE_EXTENSION_NAME), SURFACE_EXTENSION)
+	append(&extensions, cstring(vk.KHR_SURFACE_EXTENSION_NAME))
+	for e in SURFACE_EXTENSIONS { // (the window systems' extensions the loader has: Linux has two, Wayland and X11)
+		if len(SURFACE_EXTENSIONS) == 1 || instance_has_extension(string(e)) {
+			append(&extensions, e)
+		}
+	}
 	flags: vk.InstanceCreateFlags
 	when PORTABILITY {
 		// a portability implementation (MoltenVK) is only listed to an instance that says it knows what that is

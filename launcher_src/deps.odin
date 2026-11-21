@@ -144,7 +144,7 @@ when ODIN_OS == .Windows {
 }
 // a cross build's (cross.odin: Linux targets): FFmpeg's OpenSSL, and the game's own
 @(rodata) CROSS_LINUX_SYS_LIBS := []string{"-l:libssl.so.3", "-l:libcrypto.so.3", "-pthread", "-lm", "-ldl"}
-@(rodata) CROSS_ANDROID_SYS_LIBS := []string{"-landroid", "-llog", "-laaudio", "-lm", "-ldl", "-lc"}
+@(rodata) CROSS_ANDROID_SYS_LIBS := []string{"-landroid", "-llog", "-laaudio", "-lmediandk", "-lm", "-ldl", "-lc"}
 arch_flags :: proc() -> []string {return ARCH_FLAGS}
 link_libs :: proc() -> []string {return LINK_LIBS}
 

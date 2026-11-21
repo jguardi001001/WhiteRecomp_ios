@@ -11,7 +11,7 @@ import ren ".."
 // Makes the backend for a window: instance, surface, the best device, queue, swapchain, pipelines, frames. Anything that
 // fails frees what was made so far. The reasons are logged (core:log) and reported as an error value.
 create :: proc(surface: ren.Native_Surface) -> (backend: ren.Backend, err: ren.Create_Error) {
-	if surface.kind != SURFACE_KIND || surface.window == nil || surface.display == nil {
+	if !surface_kind_ok(surface.kind) || surface.window == nil || surface.display == nil {
 		return {}, .Unsupported_Surface
 	}
 	if !load_loader() {

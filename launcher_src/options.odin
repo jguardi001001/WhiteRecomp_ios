@@ -214,7 +214,6 @@ runtime_option_flags :: proc(spec: Build_Spec = {}) -> []string {
 	if !settings.tools {append(&f, "-DXRC_NO_TOOLS")}
 	if !settings.vulkan && ODIN_OS == .Windows && spec.cross == nil {append(&f, "-DXRC_D3D9_DEFAULT")}
 	if settings.skip_movies {append(&f, "-DXRC_SKIP_MOVIES")}
-	if spec.cross != nil && spec.cross.android {append(&f, "-DXRC_NO_MOVIES")} // (no FFmpeg for Android yet)
 	if settings.pad_once {append(&f, "-DXRC_PAD_ONCE")}
 	if settings.experimental {append(&f, "-DXRC_EXPERIMENTAL")}
 	return f[:]

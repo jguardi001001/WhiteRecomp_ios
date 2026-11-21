@@ -34,14 +34,15 @@ Surface_Kind :: enum u8 {
 	Win32,
 	Wayland,
 	Cocoa,
+	X11,
 }
 
 // What a backend needs of a window to draw into it. The platform layer makes one (iv_system.native_surface); anything
 // else (SDL, GLFW, a test) can make one too.
 Native_Surface :: struct {
 	kind:      Surface_Kind,
-	window:    rawptr, // Win32: HWND; Wayland: wl_surface; Cocoa: CAMetalLayer
-	display:   rawptr, // Win32: HINSTANCE; Wayland: wl_display; Cocoa: NSView
+	window:    rawptr, // Win32: HWND; Wayland: wl_surface; X11: the Window (an XID); Cocoa: CAMetalLayer
+	display:   rawptr, // Win32: HINSTANCE; Wayland: wl_display; X11: Display*; Cocoa: NSView
 	width:     int, // in pixels
 	height:    int,
 	dpi_scale: f32, // 1 = 96 dpi

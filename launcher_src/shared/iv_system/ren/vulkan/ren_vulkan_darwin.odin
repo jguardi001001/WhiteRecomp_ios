@@ -8,7 +8,7 @@ import ren ".."
 
 // ---------------------------------------------------------------------------
 // The parts of the Vulkan backend that are different on each operating system (macOS here: MoltenVK, Vulkan on top of Metal).
-// The window's view is layer-hosting with a CAMetalLayer (platform_darwin.odin makes it and keeps its contentsScale), and the
+// The window's view is SDL's Metal view (platform_sdl.odin: SDL_Metal_CreateView, which keeps the layer's contentsScale), and the
 // surface is made from that layer (VK_EXT_metal_surface). MoltenVK is a portability implementation: the instance enables
 // VK_KHR_portability_enumeration (ren_vulkan.odin) and the device VK_KHR_portability_subset (backend.odin) when they are offered.
 //
@@ -22,7 +22,11 @@ LOADER_NAME :: "libMoltenVK.dylib"
 SURFACE_KIND :: ren.Surface_Kind.Cocoa
 
 // The instance extension that makes surfaces for CAMetalLayers (besides VK_KHR_surface).
-SURFACE_EXTENSION :: cstring(vk.EXT_METAL_SURFACE_EXTENSION_NAME)
+SURFACE_EXTENSIONS :: [?]cstring{vk.EXT_METAL_SURFACE_EXTENSION_NAME}
+
+surface_kind_ok :: proc(kind: ren.Surface_Kind) -> bool {
+	return kind == .Cocoa
+}
 
 // Metal has no "can this queue present?" question without a layer: every MoltenVK queue family can present, and `create`
 // asks again with the real surface anyway.

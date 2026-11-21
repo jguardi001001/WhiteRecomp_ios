@@ -15,7 +15,11 @@ LOADER_NAME :: "vulkan-1.dll"
 SURFACE_KIND :: ren.Surface_Kind.Win32
 
 // The instance extensions a window system needs, besides VK_KHR_surface.
-SURFACE_EXTENSION :: cstring(vk.KHR_WIN32_SURFACE_EXTENSION_NAME)
+SURFACE_EXTENSIONS :: [?]cstring{vk.KHR_WIN32_SURFACE_EXTENSION_NAME}
+
+surface_kind_ok :: proc(kind: ren.Surface_Kind) -> bool {
+	return kind == .Win32
+}
 
 // Can this queue family of this device present to a window of this system? (Answered before any window exists, which is
 // what lets the probe run without one.)

@@ -3,7 +3,7 @@
 # it has uploaded bundle_macos.bin (launcher/build.sh macos) to release TAG. It builds the launcher for both kinds of
 # Mac (launcher/release.sh: Apple silicon and Intel, joined with lipo), with MoltenVK and SDL2 (both universal, from
 # their own releases) in the app, uploads WhiteRecompLauncher_macos.zip to the release and deletes bundle_macos.bin
-# from it. The app is not signed (no Developer ID): the first time, right-click > Open, or
+# from it (only then: after a failure "Re-run jobs" finds it still there). The app is not signed (no Developer ID): the first time, right-click > Open, or
 # xattr -dr com.apple.quarantine WhiteRecomp.app.
 # (Copied here from ff13decomp2's launcher/release/macos-launcher.yml by launcher/publish.sh.)
 name: macOS launcher
@@ -40,6 +40,7 @@ jobs:
           ./odin version
       - name: MoltenVK and SDL2 (universal)
         run: |
+          set -x # (each command in the log: a failure names its line)
           mkdir -p deps && cd deps
           curl -fsSL -o mvk.tar "https://github.com/KhronosGroup/MoltenVK/releases/download/$MOLTENVK_VERSION/MoltenVK-macos.tar"
           tar xf mvk.tar
@@ -48,8 +49,15 @@ jobs:
           cp "$(find . -maxdepth 2 -name LICENSE | head -1)" MoltenVK_LICENSE
           curl -fsSL -o sdl.dmg "https://github.com/libsdl-org/SDL/releases/download/release-$SDL2_VERSION/SDL2-$SDL2_VERSION.dmg"
           hdiutil attach -nobrowse -readonly -mountpoint "$PWD/sdlmnt" sdl.dmg
-          cp sdlmnt/SDL2.framework/Versions/A/SDL2 libSDL2-2.0.0.dylib
-          cp "$(find sdlmnt/SDL2.framework/ -name 'LICENSE*' | head -1)" SDL2_LICENSE.txt
+          ls -la sdlmnt
+          # (the framework and its license wherever the image keeps them: the license is not always inside it)
+          FW=$(find sdlmnt -maxdepth 3 -name SDL2.framework -type d | head -1)
+          [ -n "$FW" ] || { echo "no SDL2.framework in the SDL2 image"; exit 1; }
+          BIN="$FW/Versions/A/SDL2"; [ -f "$BIN" ] || BIN="$FW/SDL2"
+          cp -L "$BIN" libSDL2-2.0.0.dylib
+          LIC=$(find -L sdlmnt -type f \( -iname 'LICENSE*' -o -iname 'COPYING*' \) | head -1)
+          [ -n "$LIC" ] || { echo "no license file in the SDL2 image:"; find sdlmnt | head -50; exit 1; }
+          cp "$LIC" SDL2_LICENSE.txt
           hdiutil detach sdlmnt
           install_name_tool -id @rpath/libSDL2-2.0.0.dylib libSDL2-2.0.0.dylib
           codesign --force --sign - libSDL2-2.0.0.dylib
@@ -74,5 +82,5 @@ jobs:
       - name: Upload
         run: gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber WhiteRecompLauncher_macos.zip
       - name: The bundle off the release
-        if: always()
+        # (only once the app is up: a failed run keeps it, so "Re-run jobs" works without publish.sh macos again)
         run: gh release delete-asset "$TAG" bundle_macos.bin -R "$GITHUB_REPOSITORY" -y || true
