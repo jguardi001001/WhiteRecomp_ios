@@ -28,7 +28,18 @@ win_path :: proc(p: string) -> string {
 // in the launcher's own Wine folder
 wine_cmd :: proc(wine: string, args: []string) -> []string {
 	cmd := make([dynamic]string, context.temp_allocator)
-	append(&cmd, "/usr/bin/env", fmt.tprintf("WINEPREFIX=%s", wine_prefix()), "WINEDEBUG=-all", "WINEDLLOVERRIDES=mscoree,mshtml=", wine)
+	append(&cmd, "/usr/bin/env", fmt.tprintf("WINEPREFIX=%s", wine_prefix()), "WINEDEBUG=-all", "WINEDLLOVERRIDES=mscoree,mshtml=")
+	when ODIN_OS == .Linux {
+		if files := proton_dir(wine); files != "" { // (a Proton's Wine: its own libraries first, as Steam would set them)
+			lp := make([dynamic]string, context.temp_allocator)
+			for sub in ([]string{"lib64", "lib", "lib/x86_64-linux-gnu", "lib/i386-linux-gnu"}) {
+				if d := pjoin({files, sub}, context.temp_allocator); dir_exists(d) {append(&lp, d)}
+			}
+			if old := os.get_env("LD_LIBRARY_PATH", context.temp_allocator); old != "" {append(&lp, old)}
+			if len(lp) > 0 {append(&cmd, fmt.tprintf("LD_LIBRARY_PATH=%s", strings.join(lp[:], ":", context.temp_allocator)))}
+		}
+	}
+	append(&cmd, wine)
 	append(&cmd, ..args)
 	return cmd[:]
 }
@@ -52,8 +63,12 @@ wine_ready :: proc(t: ^Task, wine, tool: string) -> bool {
 	log_line(t, "Wine cannot run the converter, a 32-bit Windows program.")
 	when ODIN_OS == .Darwin {
 		log_line(t, "Use a Wine that runs 32-bit programs (Wine 9 or later, e.g. Homebrew's wine-stable); on an Apple silicon Mac it also needs Rosetta 2 (softwareupdate --install-rosetta).")
-	} else {
-		log_line(t, "Install Wine's 32-bit support: Debian / Ubuntu wine32 (sudo dpkg --add-architecture i386; sudo apt install wine32:i386), Fedora wine (it brings it), Arch wine.")
+	} else when ODIN_OS == .Linux {
+		if proton_dir(wine) != "" {
+			log_line(t, "This is a Proton's Wine (found in Steam). Install another Proton in Steam (Library > search Proton; e.g. Proton 9.0 or Proton - Experimental) and Check again, or install Wine itself.")
+		} else {
+			log_line(t, "Install Wine's 32-bit support: Debian / Ubuntu wine32 (sudo dpkg --add-architecture i386; sudo apt install wine32:i386), Fedora wine (it brings it), Arch wine.")
+		}
 	}
 	if s := strings.trim_space(strings.to_string(out)); s != "" {logf(t, "Wine said: %s", s)}
 	return false

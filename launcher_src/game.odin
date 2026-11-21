@@ -5,6 +5,7 @@ package launcher
 
 import "core:os"
 import "core:path/filepath"
+import "core:slice"
 import "core:strconv"
 import "core:strings"
 
@@ -111,3 +112,40 @@ check_game_exe :: proc(exe: string) -> (ok: bool, why: string) {
 
 @(private = "file")
 steam_path_from_registry :: proc() -> string {return registry_steam_path()}
+
+// (Linux) the wine of each Proton Steam has: steamapps/common/Proton* in every library (the microSD card's too) and
+// compatibilitytools.d/* (GE-Proton and the like) in Steam's folders. Proton 5.13 on keeps it in files/bin, older
+// ones in dist/bin. Convert Movies uses it when no other Wine is installed: on a Steam Deck, SteamOS's system
+// partition is read-only and too small for Wine's packages (and an update would wipe them), while any Deck that runs
+// FF13 through Steam already has a Proton. Newest-looking name first.
+proton_wines :: proc() -> [dynamic]string {
+	dirs := make([dynamic]string, context.temp_allocator)
+	add :: proc(dirs: ^[dynamic]string, parent: string, prefix: string) {
+		list, err := os.read_all_directory_by_path(parent, context.temp_allocator)
+		if err != nil {return}
+		for e in list {if strings.has_prefix(e.name, prefix) {append(dirs, e.fullpath)}}
+	}
+	when ODIN_OS == .Linux {
+		for lib in steam_libraries() {add(&dirs, pjoin({lib, "steamapps", "common"}, context.temp_allocator), "Proton")}
+		for root in steam_roots() {add(&dirs, pjoin({root, "compatibilitytools.d"}, context.temp_allocator), "")}
+	}
+	slice.sort_by(dirs[:], proc(a, b: string) -> bool {return filepath.base(a) > filepath.base(b)})
+	wines := make([dynamic]string, context.temp_allocator)
+	for d in dirs {
+		for sub in ([]string{"files", "dist"}) {
+			p := pjoin({d, sub, "bin", "wine"}, context.temp_allocator)
+			if file_exists(p) {append(&wines, p); break}
+		}
+	}
+	return wines
+}
+
+// (Linux) when wine is a Proton's (files/bin/wine or dist/bin/wine beside a proton script): its files (dist) folder,
+// whose libraries it needs (Steam normally gives it them through LD_LIBRARY_PATH: wine.odin wine_cmd); else ""
+proton_dir :: proc(wine: string) -> string {
+	up :: proc(p: string) -> string {i := strings.last_index_byte(p, '/'); return i > 0 ? p[:i] : p}
+	files := up(up(wine)) // (.../files)
+	if b := filepath.base(files); b != "files" && b != "dist" {return ""}
+	if !file_exists(pjoin({up(files), "proton"}, context.temp_allocator)) {return ""}
+	return files
+}

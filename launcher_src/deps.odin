@@ -546,6 +546,7 @@ wine_candidates :: proc() -> [dynamic]string {
 		for p in ([]string{"/usr/bin/wine", "/opt/wine-stable/bin/wine", "/opt/wine-staging/bin/wine", "/opt/wine-devel/bin/wine"}) {
 			if file_exists(p) {append(&c, p)}
 		}
+		for p in proton_wines() {append(&c, p)} // (Steam's Protons: a Steam Deck's Wine -- game.odin)
 	}
 	// (last: a wine64 alone runs no 32-bit program unless it is a WoW64 build; wine_ready tells)
 	if p := find_program("wine64"); p != "" {append(&c, p)}
@@ -575,7 +576,10 @@ check_wine :: proc(t: ^Task) -> Dep {
 		}
 	} else {
 		pm, cmd := linux_install_cmd("wine")
-		if pm != "" {
+		if is_steamos() { // (Wine's packages do not fit SteamOS's read-only system partition, and an update wipes them: Proton's Wine)
+			d.note = "not found: install Proton in Steam (only Convert Movies needs it)"
+			d.install_how = "In Steam: Library > search Proton > install one, then Check again"
+		} else if pm != "" {
 			d.install = cmd
 			d.install_how = fmt.aprintf("Install Wine (%s)", pm)
 			d.needs_admin = true
