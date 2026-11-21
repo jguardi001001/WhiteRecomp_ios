@@ -145,7 +145,7 @@ convert_task :: proc(t: ^Task) {
 	tool := data_path("tools", "bink2mp4.exe")
 	dll := pjoin({game, "white_data", "prog", "win", "bin", "bink2w32.dll"}, context.temp_allocator)
 	dir := movie_dir(game)
-	// as many encoder threads as the Options tab's Cutscene Convert Threads (as the game's background conversion)
+	// as many encoder threads as the CPU has threads, less one (options.odin convert_threads)
 	threads := fmt.tprintf("%d", convert_threads())
 	args := []string{"--dll", win_path(dll), "--ffmpeg", win_path(ff.path), "--threads", threads, "all", win_path(dir), win_path(dir)}
 	cmd: []string
@@ -162,7 +162,7 @@ convert_task :: proc(t: ^Task) {
 	conv = {total = todo}
 	logf(t, "Converting %d cutscenes (all of them: about 7 hours of video, English and Japanese; it can be cancelled and continued later)", todo)
 	set_status(t, 0, "Converting: 0 of %d", todo)
-	logf(t, "Converting with %s thread(s) (Options: Cutscene Convert Threads)", threads)
+	logf(t, "Converting with %s threads", threads)
 	code, started := run(t, cmd, on_line = proc(t: ^Task, line: string) {
 		// "<in>: 1280x736 (out 1280x720), 5160 frames at 29.970 fps, 4 audio tracks -> <out>" starts one,
 		// "  frame N / M (x fps)" is its progress, "  done in N s" ends it
@@ -253,8 +253,7 @@ discard_task :: proc(t: ^Task) {
 
 // ---------------------------------------------------------------------------------------------- the .v10 mark
 // white_data/movie/.v10: the MP4s there were made by a converter that knows a .wmp can hold several cutscenes (v10:
-// one MP4 a stream). Written when Convert Movies starts, and by the game's own background conversion
-// (src/runtime/host_movie_convert.c). MP4s without it are an older converter's: only each file's first cutscene, so
+// one MP4 a stream). Written when Convert Movies starts. MP4s without it are an older converter's: only each file's first cutscene, so
 // later scenes played the wrong video under their subtitles. The launcher deletes those when it starts
 // (old_movies_cleanup) and asks for a new conversion.
 V10_MARK :: ".v10"

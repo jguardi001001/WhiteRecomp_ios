@@ -90,7 +90,6 @@ Settings :: struct {
 	vulkan:          bool, // Graphics Driver: Vulkan, the default (else Direct3D 9, Windows only)
 	skip_movies:     bool, // Cutscenes: Auto-skip
 	pad_once:        bool, // Gamepad Scanning: Once (-DXRC_PAD_ONCE); else every 2 seconds
-	convert_threads: int, // Cutscene Convert Threads (0: Off -- no conversion in the background while playing)
 	pipe_threads:    int, // Pipeline Build Threads: the renderer's pipeline builders (XRC_VK_PIPE_THREADS in the .cfg; 0: the best, options.odin)
 	resolution:      int, // Resolution: an index into RESOLUTIONS (options.odin) -- the game's -Width= / -Height=
 	graphics:        int, // Graphics: a preset of the three below (GRAPHICS_PRESETS), or GRAPHICS_CUSTOM -- them as set
@@ -104,6 +103,8 @@ Settings :: struct {
 	memory_2gb:      bool, // Memory: 2 GB, as the original exe gets (XRC_GUEST_2GB=1 in the .cfg); else 4 GB
 	fx_full:         bool, // Effects Resolution: Full (XRC_VK_HALF_FX=0 in the .cfg); else Half, the default (vk_d3d9.c)
 	steam_off:       bool, // Steam Integration: Off (XRC_NO_STEAM=1 in the .cfg); else On, the default (host_steam.c; Windows, Linux)
+	voice_jp:        bool, // Features & Mods > Voice: Japanese (the game's -VoiceJPMode); else English
+	subs_jp:         bool, // Features & Mods > Subtitles: Japanese (XRC_LANGUAGE=japanese); else English
 	cross_target:    string, // the Cross-Compile tab's Target (cross.odin: a Cross_Target key; "": the first)
 	cross_cpu:       string, // its CPU (-mcpu=; "": the target's first, generic)
 	appimage:        bool, // Home tab's "As AppImage" (Linux launchers): the game as WhiteRecomp-<arch>.AppImage (appimage.odin)
@@ -114,7 +115,6 @@ settings := Settings {
 	audio           = true,
 	fps             = 60,
 	vulkan          = true,
-	convert_threads = 1,
 	graphics        = GRAPHICS_FANCY,
 	resolution      = RES_DEFAULT,
 	pgo             = true,
@@ -154,8 +154,6 @@ load_settings :: proc() {
 			settings.skip_movies = v == "1"
 		case "pad_once":
 			settings.pad_once = v == "1"
-		case "convert_threads":
-			if n_ok && n >= 0 {settings.convert_threads = n}
 		case "pipe_threads":
 			if n_ok && n >= 0 && n <= 16 {settings.pipe_threads = n}
 		case "resolution": // ("WxH": one of RESOLUTIONS, else the default)
@@ -176,6 +174,10 @@ load_settings :: proc() {
 			settings.fx_full = v == "1"
 		case "steam_off":
 			settings.steam_off = v == "1"
+		case "voice":
+			settings.voice_jp = v == "japanese"
+		case "subtitles":
+			settings.subs_jp = v == "japanese"
 		case "cross_target":
 			settings.cross_target = strings.clone(v)
 		case "cross_cpu":
@@ -212,7 +214,6 @@ save_settings :: proc() {
 	fmt.sbprintf(&b, "vulkan %d\n", settings.vulkan ? 1 : 0)
 	fmt.sbprintf(&b, "skip_movies %d\n", settings.skip_movies ? 1 : 0)
 	fmt.sbprintf(&b, "pad_once %d\n", settings.pad_once ? 1 : 0)
-	fmt.sbprintf(&b, "convert_threads %d\n", settings.convert_threads)
 	fmt.sbprintf(&b, "pipe_threads %d\n", settings.pipe_threads)
 	keys := GRAPHICS_KEYS
 	fmt.sbprintf(&b, "graphics %s\n", keys[clamp(settings.graphics, 0, GRAPHICS_CUSTOM)])
@@ -231,6 +232,8 @@ save_settings :: proc() {
 	fmt.sbprintf(&b, "stretch %d\n", settings.stretch ? 1 : 0)
 	fmt.sbprintf(&b, "fx_full %d\n", settings.fx_full ? 1 : 0)
 	fmt.sbprintf(&b, "steam_off %d\n", settings.steam_off ? 1 : 0)
+	fmt.sbprintf(&b, "voice %s\n", settings.voice_jp ? "japanese" : "english")
+	fmt.sbprintf(&b, "subtitles %s\n", settings.subs_jp ? "japanese" : "english")
 	fmt.sbprintf(&b, "cross_target %s\n", settings.cross_target)
 	fmt.sbprintf(&b, "cross_cpu %s\n", settings.cross_cpu)
 	fmt.sbprintf(&b, "appimage %d\n", settings.appimage ? 1 : 0)

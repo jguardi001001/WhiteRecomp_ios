@@ -370,12 +370,13 @@ game_out_dir :: proc() -> string {
 
 // WhiteRecomp.cfg: the built game's settings, NAME=value lines it puts in its environment at start
 // (src/runtime/xrc_rt.c load_cfg): the player's install (its C:\FINAL FANTASY XIII), its exe, the saves (the launcher's
-// cdrive), the movie converter and the ffmpeg it runs for the movies without their MP4 (host_movie_convert.c), and the
-// game's own arguments (Shadow Resolution, Anti-Aliasing: XRC_GAME_ARGS)
+// cdrive), and the game's own arguments (Shadow
+// Resolution, Anti-Aliasing, Voice: XRC_GAME_ARGS) and its text language (Subtitles: XRC_LANGUAGE)
 // the .cfg lines of the game's own options (every build's)
 cfg_game_lines :: proc(b: ^strings.Builder, spec: Build_Spec = {}) {
 	s := build_settings(spec)
 	fmt.sbprintf(b, "XRC_GAME_ARGS=%s\n", game_args(s))
+	fmt.sbprintf(b, "XRC_LANGUAGE=%s\n", s.subs_jp ? "japanese" : "english") // (the text language: Features & Mods > Subtitles)
 	if s.shadow_res == 0 {fmt.sbprintf(b, "XRC_NO_SHADOWS=1\n")}
 	if s.memory_2gb {fmt.sbprintf(b, "XRC_GUEST_2GB=1\n")}
 	if s.stretch {fmt.sbprintf(b, "XRC_STRETCH=1\n")}
@@ -383,10 +384,9 @@ cfg_game_lines :: proc(b: ^strings.Builder, spec: Build_Spec = {}) {
 	if s.steam_off {fmt.sbprintf(b, "XRC_NO_STEAM=1\n")}
 	if s.aa_fxaa && s.aa_quality > 1 {fmt.sbprintf(b, "XRC_FXAA=%d\n", s.aa_quality)}
 	if spec.cross != nil && spec.cross.android {
-		fmt.sbprintf(b, "XRC_VK_PIPE_THREADS=%d\n", s.pipe_threads) // (no cutscene conversion there)
+		fmt.sbprintf(b, "XRC_VK_PIPE_THREADS=%d\n", s.pipe_threads)
 		return
 	}
-	if s.convert_threads == 0 {fmt.sbprintf(b, "XRC_MOVIE_NO_CONVERT=1\n")} else {fmt.sbprintf(b, "XRC_MOVIE_THREADS=%d\n", convert_threads())} // (read by the game when it starts converting: no rebuild)
 	fmt.sbprintf(b, "XRC_VK_PIPE_THREADS=%d\n", pipe_threads())
 }
 
@@ -402,9 +402,7 @@ cfg_text :: proc() -> string {
 	fmt.sbprintf(&b, "XRC_EXE=%s\n", game_exe(settings.game_dir))
 	fmt.sbprintf(&b, "XRC_CDRIVE=%s\n", data_path("cdrive"))
 	when ODIN_OS == .Windows {
-		fmt.sbprintf(&b, "XRC_MOVIE_CONVERTER=%s\n", data_path("tools", "bink2mp4.exe"))
 		fmt.sbprintf(&b, "XRC_STEAM_HELPER=%s\n", data_path("tools", "steamhelper.exe"))
-		if ff := dep_get(.FFmpeg); ff.can_encode && ff.path != "" {fmt.sbprintf(&b, "XRC_MOVIE_FFMPEG=%s\n", ff.path)}
 	}
 	when ODIN_OS == .Darwin {
 		// the .app's own MoltenVK (Vulkan on Metal) and SDL2 (window, controllers, sound), if it has them: the game

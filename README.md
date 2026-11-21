@@ -65,7 +65,7 @@ macOS support is new and has not been run on a Mac yet. Reports of what works an
 The **Options** tab is saved between sessions.
 
 - **Build options:** most options change how the game is compiled, so they take effect the next time you press **Build**.
-- **Game options:** **Resolution**, **Window Scaling**, **Graphics**, **Effects Resolution**, **Cutscene Convert Threads**, **Steam Integration**, **Pipeline Build Threads** and **Memory** are passed to the game when it starts. They take effect the next time you start the game, with no rebuild.
+- **Game options:** **Resolution**, **Window Scaling**, **Graphics**, **Effects Resolution**, **Steam Integration**, **Pipeline Build Threads** and **Memory** are passed to the game when it starts. They take effect the next time you start the game, with no rebuild.
 
 The options are grouped as on the tab: Display, Graphics, Audio & Controls, Cutscenes, Steam (Windows, Linux), Performance and Build.
 
@@ -137,18 +137,12 @@ How the game finds controllers. FINAL FANTASY XIII only reads DirectInput contro
 
 #### Cutscenes
 
-FINAL FANTASY XIII's cutscenes are Bink 2 videos, which the port can't play directly. Each one is converted to an MP4 once. **Convert Movies** on the Home tab does them all, and while you play the game also converts missing ones quietly in the background, one at a time.
+FINAL FANTASY XIII's cutscenes are Bink 2 videos, which the port can't play directly. Each one is converted to an MP4 once. **Convert Movies** on the Home tab does them all, using every CPU thread but one. The game itself no longer converts anything while you play.
 
 Many movie files hold several cutscenes one after another (`z016_us.win32.wmp` holds 8). Each cutscene gets its own MP4: the first one `<name>.mp4`, the others `<name>_<offset>.mp4`. Older launchers converted only the first cutscene of each file, so later scenes played the wrong video under their subtitles, or were skipped (and `z004` never finished converting). MP4s converted now come with a `.v10` file in the movie folder. When the launcher starts and finds MP4s without it, it deletes them and asks you to run **Convert Movies** again. If you used **Discard Movies** with an older launcher, those cutscenes were cut out of the files: have Steam restore them first (Properties > Installed Files > Verify integrity of game files), then Convert Movies.
 
 - **Play if converted** (default): a cutscene plays once its MP4 exists. Until then it's skipped.
-- **Auto-skip:** every cutscene is skipped, even converted ones, which is handy for replays and speedruns. Background conversion continues, so the movies are ready if you switch back (followed by a new Build).
-
-#### Cutscene Convert Threads
-
-How many CPU threads movie conversion uses, both for **Convert Movies** and for background conversion while you play. The default is **1**, so conversion doesn't slow the game down. Raise it to make **Convert Movies** finish sooner. The maximum is your CPU count minus one.
-
-**Off** stops the background conversion while you play (no Build needed). **Convert Movies** still works, with 1 thread.
+- **Auto-skip:** every cutscene is skipped, even converted ones, which is handy for replays and speedruns. Converted ones play again if you switch back (followed by a new Build).
 
 ### Steam
 
@@ -244,6 +238,17 @@ The **Cross-Compile** tab builds the game for another kind of computer than the 
 - **Build for Linux ARM64** builds into the folder `WhiteRecomp-linux-arm64` beside the launcher. Copy that folder to the ARM64 computer, put (or link) your `FINAL FANTASY XIII` folder inside it, and run `./WhiteRecomp` there. Its `README.txt` has the steps. That computer needs Vulkan drivers and SDL2 (e.g. `sudo apt install libsdl2-2.0-0 mesa-vulkan-drivers`). Convert the cutscenes on a Windows PC first: they travel with the game folder.
 - **As AppImage** (Linux targets: the switch above the Build button). When it's on, the Linux build is one file, `WhiteRecomp-aarch64.AppImage`, in that folder (with a `README.txt`) instead of the program, its `.cfg` and `cdrive`. Copy the AppImage to the other computer, put (or link) your `FINAL FANTASY XIII` folder next to it, `chmod +x` it and run it. Saves go in `cdrive/` next to the AppImage. It needs FUSE there to open (`sudo apt install libfuse2`, or `libfuse2t64`), or start it with `--appimage-extract-and-run`. It's compressed when this computer has `mksquashfs` (squashfs-tools; Linux and macOS), else packed uncompressed (the Windows launcher always does that).
 - **Build for Android ARM64** makes `WhiteRecomp.apk` in the folder `WhiteRecomp-android-arm64` beside the launcher. No Android SDK or Java is needed: the launcher writes and signs the APK itself, with a key it makes the first time (`android_key.bin` and `android_cert.der` in its data folder; keep them, since Android installs an update over the app only when it's signed by the same key). Install the APK on the device, copy your `FINAL FANTASY XIII` folder to the device's internal storage or to the top of a microSD card (the game looks on every card and USB drive; anywhere else, put the folder's full path, e.g. `/storage/1234-ABCD/Games/FINAL FANTASY XIII`, in `Android/data/com.whiterecomp.ff13/files/game_dir.txt`), start the app and allow access to your files. The folder's `README.txt` has the steps. Cutscenes play through Android's own video decoder (convert the movies on a PC first, with Convert Movies: the `.mp4` files go with the game folder). It has **on-screen touch controls**: A, B, **0** (pause: the controller's Start) and **1** (select / skip: Back), and two analog sticks. Put a finger down anywhere else on the left half of the screen and a stick appears there, a ring with a knob that follows your finger: that's the left stick (moving). Do the same on the right half for the right stick (the camera). The controls hide as soon as you use a game controller and come back when you touch the screen. `XRC_TOUCH=0` in the device's `ff13.cfg` turns them off (a touch is then the mouse). A game controller, or a keyboard and mouse, work too. The APK is built with the Options tab's options as set, packed in it. **Use Android Preset** (on the Cross-Compile tab, with Android ARM64 chosen) sets them for a phone: 960x540, 60 fps, 512 shadows (the lowest that keeps them), anti-aliasing off, effects at half resolution, 4 GB of memory, optimization level -O1 and 2 Pipeline Build Threads; sound, cutscenes and the rest stay as they are. These become the Options tab's settings, so a Build for your PC uses them too until you change them back; an `ff13.cfg` in `Android/data/com.whiterecomp.ff13/files` on the device overrides them.
+
+## Features & Mods
+
+Options that change what the game plays. They go into the built game's settings, so they apply the next time you start the game, with no rebuild.
+
+### Language
+
+- **Voice:** **English** (the default) or **Japanese**, cutscenes included. Both voice sets come with the game. Convert Movies converts both cutscene sets, so either plays.
+- **Subtitles:** **English** (the default) or **Japanese**: subtitles, menus and all other text. The PC release only offers Japanese voices, not Japanese text, although the Japanese text is in its files: the port turns it on. Any voice works with any text language.
+
+These replace the language you chose for the game in Steam.
 
 ## What the download contains
 

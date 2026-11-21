@@ -14,11 +14,7 @@
 //                             for now (the cutscene after the first fight never plays)
 //   Gamepad Scanning          Once: -DXRC_PAD_ONCE -- the game controllers looked for once, at the start (else every 2
 //                             seconds, the default: the game asks that often; src/runtime/ref_dinput.c, hle_dinput.c)
-//   Cutscenes                 Auto-skip: -DXRC_SKIP_MOVIES (every movie skipped; the background conversion goes on)
-//   Cutscene Convert Threads  XRC_MOVIE_THREADS=N in WhiteRecomp.cfg (no Build needed): the CPUs and encoder threads
-//                             of the background conversion; Convert Movies (movies.odin) runs the converter with as
-//                             many (--threads N). Off: no background conversion (XRC_MOVIE_NO_CONVERT=1 there);
-//                             Convert Movies then uses 1
+//   Cutscenes                 Auto-skip: -DXRC_SKIP_MOVIES (every movie skipped)
 //   Pipeline Build Threads    XRC_VK_PIPE_THREADS=N in WhiteRecomp.cfg (no Build needed): the threads that make the
 //                             renderer's pipelines in the background (vk_d3d9.c pj_threads); the default (Best) half
 //                             the CPU threads, at most 8
@@ -68,11 +64,8 @@ import "core:strings"
 OPT_LEVELS :: [4]string{"0 (Fastest)", "1 (Recommended)", "2", "3 (Slowest)"}
 FPS_CHOICES :: [2]int{30, 60}
 
-// the highest Cutscene Convert Threads: the cores less one (the game's own)
-max_convert_threads :: proc() -> int {return max(1, os.get_processor_core_count() - 1)}
-
-// the CPUs a conversion uses (Off: Convert Movies still runs, with 1)
-convert_threads :: proc() -> int {return clamp(settings.convert_threads, 1, max_convert_threads())}
+// Convert Movies' encoder threads: the CPU's threads less one (nproc - 1), at least 1
+convert_threads :: proc() -> int {return max(1, os.get_processor_core_count() - 1)}
 
 // Pipeline Build Threads: the most (all the CPU threads but one, at most 16), the best (half of them, at most 8:
 // the rest for the game's own threads and the movie conversion), and the one the settings ask for (0: the best)
@@ -277,6 +270,7 @@ game_args :: proc(s: Settings = settings) -> string {
 	res := RESOLUTIONS
 	r := res[clamp(s.resolution, 0, len(res) - 1)]
 	if r.w != 1280 || r.h != 720 {args = fmt.tprintf("%s -Width=%d -Height=%d", args, r.w, r.h)}
+	if s.voice_jp {args = fmt.tprintf("%s -VoiceJPMode", args)} // (Japanese voices: the retail launcher's argument -- features.odin)
 	return args
 }
 

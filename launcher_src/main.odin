@@ -1,5 +1,5 @@
 // The launcher: builds this project's FINAL FANTASY XIII port on the player's computer, from the sources it carries
-// (bundle.odin) and the player's own game (game.odin). Its window has three tabs:
+// (bundle.odin) and the player's own game (game.odin). Its window has four tabs:
 //   Home     where the game is, what the computer still needs (deps.odin: each with an Install button; an install
 //            that needs administrator asks for it then, for that program alone), what is running (task.odin: progress,
 //            a log, Cancel), and in the bottom right corner the buttons:
@@ -11,6 +11,7 @@
 //              Cancel             (left of them while a task runs)
 //   Options  how the game is built (options.odin): compiler, optimization, audio, tools, FPS, graphics, cutscenes
 //   Cross-Compile  the game built for another kind of computer (cross.odin: Linux ARM64), with Clang and lld
+//   Features & Mods  what the game plays: Language (voice, subtitles) -- features.odin
 // Without any C compiler, a dialog says where to get one. The look and the controls: widgets.odin.
 //
 // Build: launcher/build.sh (packs the sources with build/bundle.exe, then odin build). Uses shared/ (the iv_* libraries).
@@ -97,6 +98,7 @@ Tab :: enum {
 	Home,
 	Options,
 	Cross,
+	Features,
 }
 tab: Tab
 confirm_discard: bool
@@ -250,7 +252,7 @@ thread_join_task :: proc() {
 draw_window :: proc(g: ^Gui, w: ^platform.Window) {
 	body := ui.inset_xy(g.screen, px(g, 24), px(g, 12))
 	bar, rest := ui.cut_top(body, px(g, 40))
-	tab = Tab(tabs(g, bar, {"Home", "Options", "Cross-Compile"}, int(tab)))
+	tab = Tab(tabs(g, bar, {"Home", "Options", "Cross-Compile", "Features & Mods"}, int(tab)))
 	_, rest = ui.cut_top(rest, px(g, 16))
 	switch tab {
 	case .Home:
@@ -259,6 +261,8 @@ draw_window :: proc(g: ^Gui, w: ^platform.Window) {
 		draw_options(g, rest)
 	case .Cross:
 		draw_cross(g, rest)
+	case .Features:
+		draw_features(g, rest)
 	}
 	if confirm_discard {draw_confirm(g, get_game())}
 	if sync.atomic_load(&reconvert_dialog) && !confirm_discard {draw_reconvert(g, get_game())}
@@ -423,7 +427,7 @@ draw_task :: proc(g: ^Gui, r: ui.Rect, running: bool) {
 }
 
 // ---------------------------------------------------------------------------------------------- Options
-CUTSCENE_TIP :: "FINAL FANTASY XIII's cutscenes are Bink 2 videos, which this port cannot play directly: each one is converted to an MP4 once (Convert Movies on the Home tab does them all; while you play, the game also converts the missing ones in the background, quietly, one at a time). A cutscene that has no MP4 yet is skipped.\n\nPlay if converted: a cutscene plays once its MP4 exists, and is skipped until then.\nAuto-skip: every cutscene is skipped, even the converted ones (for replays and speedruns). The background conversion goes on, so they are ready if you switch back (with a new Build)."
+CUTSCENE_TIP :: "FINAL FANTASY XIII's cutscenes are Bink 2 videos, which this port cannot play directly: each one is converted to an MP4 once (Convert Movies on the Home tab does them all). A cutscene that has no MP4 yet is skipped.\n\nPlay if converted: a cutscene plays once its MP4 exists, and is skipped until then.\nAuto-skip: every cutscene is skipped, even the converted ones (for replays and speedruns). Converted ones play again if you switch back (with a new Build)."
 
 // the options' scroll position (pixels from the top) and its scroll bar's drag
 opt_scroll: int
@@ -614,17 +618,6 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 		if n, ch := dropdown(g, "cutscenes", ctrl, names, settings.skip_movies ? 1 : 0, active = active); ch {settings.skip_movies = n == 1; changed = true}
 		note_text(g, "Hover for how cutscenes work", note, DIM)
 		tooltip_zone(g, "cutscenes", whole, CUTSCENE_TIP)
-	}
-	// Cutscene Convert Threads
-	{
-		_, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Cutscene Convert Threads:")
-		n_max := max_convert_threads()
-		names := make([]string, n_max + 1, context.temp_allocator)
-		names[0] = "Off"
-		for i in 1 ..= n_max {names[i] = i == 1 ? "1 (Default)" : fmt.tprintf("%d", i)}
-		sel := settings.convert_threads == 0 ? 0 : clamp(settings.convert_threads, 1, n_max)
-		if n, ch := dropdown(g, "threads", ctrl, names, sel, active = active); ch {settings.convert_threads = n; changed = true; game_changed = true}
-		note_text(g, sel == 0 ? "No converting while you play (Convert Movies uses 1)" : "CPU threads for converting (Convert Movies and in the background)", note, DIM)
 	}
 	// ---- Steam (host_steam.c -- Windows: the achievements helper; Linux x86-64: the player's steamclient.so; both: Steam's
 	// overlay)
