@@ -3,11 +3,12 @@
 //   Home     where the game is, what the computer still needs (deps.odin: each with an Install button; an install
 //            that needs administrator asks for it then, for that program alone), what is running (task.odin: progress,
 //            a log, Cancel), and in the bottom right corner the buttons:
-//              Build              the game, with the computer's C compiler and the options (build_game.odin)
+//              Build              the game, with the computer's C compiler and the options (build_game.odin); each
+//                                 one first clears the data folder (wipe_data_dir: all but the saves, settings,
+//                                 Android key and the player's ffmpeg/)
 //              Convert Movies     the Bink movies to MP4, once (movies.odin)
 //              Discard Movies     frees the space of the Bink movies that have their MP4 (movies.odin)
-//              Delete Last Build  the compiled objects of every build, so the next Build compiles everything again
-//                                 (build_game.odin clean_task); Cancel takes its place while a task runs
+//              Cancel             (left of them while a task runs)
 //   Options  how the game is built (options.odin): compiler, optimization, audio, tools, FPS, graphics, cutscenes
 //   Cross-Compile  the game built for another kind of computer (cross.odin: Linux ARM64), with Clang and lld
 // Without any C compiler, a dialog says where to get one. The look and the controls: widgets.odin.
@@ -93,9 +94,6 @@ Tab :: enum {
 }
 tab: Tab
 confirm_discard: bool
-confirm_clean: bool // the Delete Last Build dialog (with what it would delete: clean_files, clean_bytes)
-clean_files: int
-clean_bytes: i64
 no_compiler_dialog: int // 0 not decided yet, 1 showing, 2 closed
 log_scroll: int // lines up from the end
 frame_wheel: int // this frame's wheel steps
@@ -148,12 +146,6 @@ main :: proc() {
 			for l in task.log {fmt.println(l)}
 			os.exit(task.failed ? 1 : 0)
 		}
-		if a == "--delete-build" { 	// (the Home tab's Delete Last Build, without asking)
-			task_start("Delete Last Build", proc(t: ^Task) {clean_task(t)})
-			thread_join_task()
-			for l in task.log {fmt.println(l)}
-			os.exit(task.failed ? 1 : 0)
-		}
 		if a == "--check" {
 			task_start("Checking", check_all_task)
 			thread_join_task()
@@ -200,7 +192,7 @@ main :: proc() {
 	for !app.window.close_requested {
 		frame_start := time.tick_now()
 		win_events := iv.pump(app, &ctx)
-		if len(app.window.input) > 0 || win_events != {} || sync.atomic_load(&task.running) || confirm_discard || confirm_clean || browser_is_open() {
+		if len(app.window.input) > 0 || win_events != {} || sync.atomic_load(&task.running) || confirm_discard || browser_is_open() {
 			last_active = frame_start
 		}
 		mx, my := input.mouse_position(&ctx)
@@ -211,7 +203,7 @@ main :: proc() {
 			no_compiler_dialog = len(compilers_get()) == 0 ? 1 : 2
 		}
 		pick_poll()
-		g.modal = confirm_discard || confirm_clean || no_compiler_dialog == 1 || browser_is_open()
+		g.modal = confirm_discard || no_compiler_dialog == 1 || browser_is_open()
 		_, wy := input.wheel(&ctx)
 		frame_wheel = int(wy * 3)
 		if !g.modal {log_scroll = max(0, log_scroll + frame_wheel)}
@@ -248,8 +240,7 @@ draw_window :: proc(g: ^Gui, w: ^platform.Window) {
 		draw_cross(g, rest)
 	}
 	if confirm_discard {draw_confirm(g, get_game())}
-	if confirm_clean {draw_confirm_clean(g)}
-	if no_compiler_dialog == 1 {draw_no_compiler(g)}
+	if no_compiler_dialog == 1 {draw_no_compiler(g, w)}
 	if browser_is_open() {draw_browser(g, frame_wheel)}
 }
 
@@ -283,10 +274,10 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	build_r = ui.Rect{build_r.x, build_r.y, build_r.w, px(g, 44)}
 	conv_r, rest2 := ui.cut_right(rest, px(g, 140), px(g, 8))
 	disc_r, rest3 := ui.cut_right(rest2, px(g, 140), px(g, 8))
-	clean_r, _ := ui.cut_right(rest3, px(g, 150), px(g, 8))
+	cancel_r, _ := ui.cut_right(rest3, px(g, 150), px(g, 8))
 	conv_r = ui.Rect{conv_r.x, conv_r.y + px(g, 6), conv_r.w, px(g, 32)}
 	disc_r = ui.Rect{disc_r.x, disc_r.y + px(g, 6), disc_r.w, px(g, 32)}
-	clean_r = ui.Rect{clean_r.x, clean_r.y + px(g, 6), clean_r.w, px(g, 32)}
+	cancel_r = ui.Rect{cancel_r.x, cancel_r.y + px(g, 6), cancel_r.w, px(g, 32)}
 
 	cc_ok := dep_get(.Compiler).path != ""
 	ff := dep_get(.FFmpeg)
@@ -311,14 +302,7 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	disc_tip := busy != "" ? busy : !gs.ok ? "Needs the game." : gs.discardable == 0 ? "Nothing to discard: no Bink movie has its MP4 yet." : fmt.tprintf("Frees %.1f GB: the Bink movies that have their MP4.", f64(gs.free_bytes) / 1e9)
 	tooltip_zone(g, "discard", disc_r, disc_tip)
 	if running {
-		// (in Delete Last Build's place: it cannot run while a task does)
-		if button(g, clean_r, "Cancel") {task_cancel()}
-	} else {
-		if button(g, clean_r, "Delete Last Build", !playing) {
-			clean_files, clean_bytes = clean_plan()
-			confirm_clean = true
-		}
-		tooltip_zone(g, "clean", clean_r, playing ? "Close the game first." : "Deletes the compiled files of the last builds, so the next Build compiles everything from scratch instead of reusing them.")
+		if button(g, cancel_r, "Cancel") {task_cancel()}
 	}
 
 	// the game
@@ -771,54 +755,41 @@ draw_confirm :: proc(g: ^Gui, gs: Game_State) {
 	if button(g, no, "Keep them") {confirm_discard = false}
 }
 
-draw_confirm_clean :: proc(g: ^Gui) {
-	g.in_modal = true
-	defer g.in_modal = false
-	box := dialog_box(g, px(g, 520), px(g, 250))
-	in_ := ui.inset_xy(box, px(g, 24), px(g, 22))
-	ren.draw_text(g.dl, g.big, "Delete the last build?", {in_.x, in_.y}, TEXT)
-	y := in_.y + g.big.line_height + px(g, 12)
-	text := clean_files == 0 ? "There are no build files to delete: the next Build compiles everything anyway." : fmt.tprintf("The %d compiled files of the last builds (%.0f MB: this computer's and the Cross-Compile targets') are deleted, so the next Build compiles every file again, which takes longer. The built game, its settings and your saves stay.", clean_files, f64(clean_bytes) / 1e6)
-	paragraph(g, g.font, text, {in_.x, y, in_.w, 0}, TEXT, px(g, 2))
-	btns := dialog_buttons(g, box)
-	yes, no := ui.columns(btns, 0, 2, px(g, 8)), ui.columns(btns, 1, 2, px(g, 8))
-	if button(g, yes, "Delete", clean_files > 0, primary = true) {
-		confirm_clean = false
-		task_start("Delete Last Build", proc(t: ^Task) {clean_task(t)})
-	}
-	if button(g, no, clean_files > 0 ? "Keep them" : "Close") {confirm_clean = false}
-}
 
-draw_no_compiler :: proc(g: ^Gui) {
+draw_no_compiler :: proc(g: ^Gui, w: ^platform.Window) {
 	g.in_modal = true
 	defer g.in_modal = false
-	box := dialog_box(g, px(g, 580), px(g, 380))
+	box := dialog_box(g, px(g, 640), px(g, 450))
 	in_ := ui.inset_xy(box, px(g, 24), px(g, 22))
 	ren.draw_text(g.dl, g.big, "A C compiler is needed", {in_.x, in_.y}, TEXT)
 	y := in_.y + g.big.line_height + px(g, 12)
 	when ODIN_OS == .Linux {
 		y += paragraph(g, g.font, "The launcher builds the game on your computer, and that needs a C compiler: Clang (the best: a faster game) or GCC. None was found. Install one, then press Check again.", {in_.x, y, in_.w, 0}, TEXT, px(g, 2))
 	} else {
-		y += paragraph(g, g.font, "The launcher builds the game on your computer, and that needs Clang (the game is built with Clang only: GCC is not used). None was found. Install one, then press Check again.", {in_.x, y, in_.w, 0}, TEXT, px(g, 2))
+		y += paragraph(g, g.font, "The launcher builds the game on your computer, and that needs Clang (the game is built with Clang only: GCC is not used). None was found. Install one, then press Check again -- or, if it is installed but not found, Choose it.", {in_.x, y, in_.w, 0}, TEXT, px(g, 2))
 	}
 	y += px(g, 12)
 	lh := g.font.line_height + px(g, 10)
 	when ODIN_OS == .Windows {
 		x := in_.x + px(g, 12)
 		ren.draw_text(g.dl, g.bold, "Windows", {in_.x, y}, TEXT); y += lh
-		w := link(g, x, y, "LLVM-MinGW (Clang)", "https://github.com/mstorsjo/llvm-mingw/releases")
-		ren.draw_text(g.dl, g.small, "  the ucrt-x86_64 zip, or: winget install MartinStorsjo.LLVM-MinGW.UCRT", {x + w, y + px(g, 2)}, DIM); y += lh
+		lw := link(g, x, y, "LLVM-MinGW (Clang)", "https://github.com/mstorsjo/llvm-mingw/releases")
+		ren.draw_text(g.dl, g.small, "  the ucrt-x86_64 zip, or: winget install MartinStorsjo.LLVM-MinGW.UCRT", {x + lw, y + px(g, 2)}, DIM); y += lh
 		link(g, x, y, "MSYS2 (its clang64 Clang)", "https://www.msys2.org/"); y += lh
 	} else {
 		x := in_.x + px(g, 12)
 		ren.draw_text(g.dl, g.bold, "Linux", {in_.x, y}, TEXT); y += lh
-		w := link(g, x, y, "Clang", "https://clang.llvm.org/get_started.html")
-		ren.draw_text(g.dl, g.small, "  e.g. sudo apt install clang  /  sudo dnf install clang", {x + w, y + px(g, 2)}, DIM); y += lh
+		lw := link(g, x, y, "Clang", "https://clang.llvm.org/get_started.html")
+		ren.draw_text(g.dl, g.small, "  e.g. sudo apt install clang  /  sudo dnf install clang", {x + lw, y + px(g, 2)}, DIM); y += lh
 	}
 	btns := dialog_buttons(g, box)
 	d := dep_get(.Compiler)
+	if d.note != "" && d.note != "none found" { // (what was tried, and why each was not taken)
+		y += px(g, 6)
+		paragraph(g, g.small, fmt.tprintf("Tried: %s", d.note), {in_.x, y, in_.w, 0}, DIM, px(g, 2))
+	}
 	running := sync.atomic_load(&task.running)
-	cols := d.install != nil ? 3 : 2
+	cols := (d.install != nil ? 3 : 2) + (ODIN_OS != .Linux ? 1 : 0)
 	i := 0
 	if d.install != nil {
 		if button(g, ui.columns(btns, i, cols, px(g, 8)), "Install it for me", !running, primary = true) {
@@ -830,6 +801,10 @@ draw_no_compiler :: proc(g: ^Gui) {
 	if button(g, ui.columns(btns, i, cols, px(g, 8)), "Check again", !running, primary = d.install == nil) {
 		no_compiler_dialog = 0
 		task_start("Checking", check_all_task)
+	}
+	when ODIN_OS != .Linux {
+		if button(g, ui.columns(btns, i + 1, cols, px(g, 8)), ODIN_OS == .Windows ? "Choose clang.exe…" : "Choose clang…", !running) {pick_compiler(w)}
+		i += 1
 	}
 	if button(g, ui.columns(btns, i + 1, cols, px(g, 8)), "Close") {no_compiler_dialog = 2}
 }

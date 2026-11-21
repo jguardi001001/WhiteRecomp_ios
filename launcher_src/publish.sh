@@ -3,6 +3,9 @@
 # launcher/publish.sh release TAG [REPO]   (WSL; after launcher/build.sh all) a GitHub release of the launchers
 #                                          (REPLACE=1: every earlier release and its tag deleted first)
 # launcher/publish.sh macos TAG            (WSL) the macOS launcher again for release TAG (after a failed run)
+# launcher/publish.sh update TAG [REPO]    (WSL; after launcher/build.sh for all four) release TAG's launchers replaced by
+#                                          the ones in build/, its tag moved to the commit pushed last (origin/main),
+#                                          and the macOS launcher built again for it
 # The repo (default C:\Users\psivstar\Documents\proj\WhiteRecomp; on GitHub ps4star/WhiteRecomp) holds:
 #   README.md                              launcher/release/README.md (GitHub's page)
 #   THIRD_PARTY_LICENSES.txt               launcher/release/ (CRLF)
@@ -47,6 +50,47 @@ macos_start() {
 	[ "$CODE" = 204 ] || { echo "publish: starting the macOS workflow failed ($CODE): is .github/workflows/macos-launcher.yml pushed?"; exit 1; }
 	echo "macOS launcher: building on GitHub (https://github.com/$GH_REPO/actions); it adds WhiteRecompLauncher_macos.zip to $1"
 }
+# asset_url RELEASE_ID NAME: the API URL of the release's asset NAME ("" if it has none)
+asset_url() {
+	curl -s -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/$GH_REPO/releases/$1/assets?per_page=100" |
+		tr -d '\n ' | grep -o '"url":"[^"]*/assets/[0-9]*","id":[0-9]*,"node_id":"[^"]*","name":"'"$2"'"' | sed 's/^"url":"\([^"]*\)".*/\1/' | head -1
+}
+if [ "${1:-}" = update ]; then
+	TAG=${2:?usage: launcher/publish.sh update TAG [REPO]}
+	REPO=${3:-/mnt/c/Users/psivstar/Documents/proj/WhiteRecomp}
+	for f in build/WhiteRecompLauncher_windows.exe build/WhiteRecompLauncher_linux build/WhiteRecompLauncher_linux_arm64; do
+		[ -f "$f" ] || { echo "publish: $f is missing (launcher/build.sh windows / linux / linux_arm64)"; exit 1; }
+	done
+	no_sources "$REPO"
+	gh_token
+	ID=$(curl -s -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/$GH_REPO/releases/tags/$TAG" | sed -n 's/^  "id": \([0-9]*\),$/\1/p' | head -1)
+	[ -n "$ID" ] || { echo "publish: no release $TAG"; exit 1; }
+	# the tag to the sources these launchers were built from
+	SHA=$(cd "$REPO" && "$WINGIT" rev-parse origin/main | tr -d '\r')
+	CODE=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+		"https://api.github.com/repos/$GH_REPO/git/refs/tags/$TAG" -d "{\"sha\":\"$SHA\",\"force\":true}")
+	[ "$CODE" = 200 ] || { echo "publish: moving tag $TAG to $SHA failed ($CODE)"; exit 1; }
+	echo "tag $TAG -> $SHA"
+	# each launcher: the new one uploaded under a temporary name, the old one deleted, the new one renamed (the
+	# download is missing only between those two calls)
+	for f in build/WhiteRecompLauncher_windows.exe build/WhiteRecompLauncher_linux build/WhiteRecompLauncher_linux_arm64; do
+		n=$(basename "$f")
+		old=$(asset_url "$ID" "$n.new"); [ -z "$old" ] || curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $TOKEN" "$old"
+		OUT=$(mktemp)
+		CODE=$(curl -s -o "$OUT" -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/octet-stream" \
+			--data-binary "@$f" "https://uploads.github.com/repos/$GH_REPO/releases/$ID/assets?name=$n.new")
+		[ "$CODE" = 201 ] || { echo "publish: uploading $n failed ($CODE)"; rm -f "$OUT"; exit 1; }
+		new=$(tr -d '\n ' < "$OUT" | grep -o '"url":"[^"]*/assets/[0-9]*"' | head -1 | sed 's/^"url":"\(.*\)"$/\1/')
+		rm -f "$OUT"
+		old=$(asset_url "$ID" "$n"); [ -z "$old" ] || curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $TOKEN" "$old"
+		CODE=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "$new" -d "{\"name\":\"$n\"}")
+		[ "$CODE" = 200 ] || { echo "publish: renaming the new $n failed ($CODE): it is on the release as $n.new"; exit 1; }
+		echo "replaced $n"
+	done
+	macos_start "$TAG" "$ID"
+	echo "https://github.com/$GH_REPO/releases/tag/$TAG"
+	exit 0
+fi
 if [ "${1:-}" = macos ]; then
 	TAG=${2:?usage: launcher/publish.sh macos TAG}
 	gh_token

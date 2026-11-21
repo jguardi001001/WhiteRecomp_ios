@@ -17,6 +17,7 @@ import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "core:sync"
+import "shared:iv_system/platform"
 
 Dep_Kind :: enum {
 	Compiler,
@@ -152,6 +153,8 @@ link_libs :: proc() -> []string {return LINK_LIBS}
 compiler_candidates :: proc() -> [dynamic]string {
 	c := make([dynamic]string, context.temp_allocator)
 	add :: proc(c: ^[dynamic]string, p: string) {if p != "" {append(c, p)}}
+	// the one the settings name -- also one chosen with "Choose clang" (draw_no_compiler) -- is tried first
+	if filepath.is_abs(settings.compiler) && file_exists(settings.compiler) {append(&c, settings.compiler)}
 	when ODIN_OS == .Windows {
 		for n in ([]string{"x86_64-w64-mingw32-clang", "clang"}) {add(&c, find_program(n))}
 		// winget's llvm-mingw (not on this process's PATH right after it was installed)
@@ -203,6 +206,11 @@ probe_compiler :: proc(t: ^Task, cc: string) -> (ok: bool, why: string) {
 	if code != 0 {
 		s := strings.to_string(out)
 		first, _, _ := strings.partition(s, "\n")
+		when ODIN_OS == .Linux {
+			if (strings.contains(s, "pthread.h") || strings.contains(s, "stdio.h")) && (strings.contains(s, "not found") || strings.contains(s, "No such file")) {
+				return false, is_steamos() ? "the C library's headers (pthread.h) are missing -- SteamOS removes them; Install it for me puts them back" : "the C library's headers (pthread.h) are missing: install glibc's development files (Install it for me)"
+			}
+		}
 		return false, fmt.tprintf("it cannot build the game (%s)", strings.trim_space(first))
 	}
 	res := strings.builder_make(context.temp_allocator)
@@ -284,7 +292,7 @@ check_compiler :: proc(t: ^Task) -> Dep {
 		pm, cmd := linux_install_cmd("compiler")
 		if pm != "" {
 			d.install = cmd
-			d.install_how = fmt.aprintf("Install Clang (%s)", pm)
+			d.install_how = c_headers_missing() ? fmt.aprintf("Install Clang and the C headers (%s)", pm) : fmt.aprintf("Install Clang (%s)", pm)
 			d.needs_admin = true
 		}
 	}
@@ -396,13 +404,15 @@ linux_install_cmd :: proc(what: string) -> (pm: string, cmd: []string) {
 		return "apt", clone_cmd({p, "install", "-y", "ffmpeg"})
 	}
 	if p := find_program("dnf"); p != "" {
-		return "dnf", clone_cmd({p, "install", "-y", what == "compiler" ? "clang" : "ffmpeg-free"})
+		if what == "compiler" {return "dnf", clone_cmd({p, "install", "-y", "clang", "glibc-devel"})}
+		return "dnf", clone_cmd({p, "install", "-y", "ffmpeg-free"})
 	}
 	if p := find_program("pacman"); p != "" {
-		return "pacman", clone_cmd({p, "-S", "--needed", "--noconfirm", what == "compiler" ? "clang" : "ffmpeg"})
+		return "pacman", pacman_cmd(p, what)
 	}
 	if p := find_program("zypper"); p != "" {
-		return "zypper", clone_cmd({p, "--non-interactive", "install", what == "compiler" ? "clang" : "ffmpeg"})
+		if what == "compiler" {return "zypper", clone_cmd({p, "--non-interactive", "install", "clang", "glibc-devel"})}
+		return "zypper", clone_cmd({p, "--non-interactive", "install", "ffmpeg"})
 	}
 	return "", nil
 }
@@ -442,4 +452,53 @@ install_dep_task :: proc(t: ^Task) {
 		if k == .Compiler {log_line(t, "Finish the installer Apple opened, then press Check again.")}
 	}
 	check_deps_task(t)
+}
+
+// "Choose clang…" (the no-compiler dialog): the user points at the compiler, which is then probed as the others are
+// (a clang that cannot build the game -- e.g. LLVM's own Windows one, which targets MSVC: no pthreads -- is still not
+// taken, and the dialog says why). Not on Linux (the platform layer has no file dialog there yet).
+pick_compiler :: proc(w: ^platform.Window) {
+	dir := ""
+	if filepath.is_abs(settings.compiler) {dir, _ = filepath.split(settings.compiler)}
+	when ODIN_OS == .Windows {title := "Choose clang.exe (e.g. LLVM-MinGW's bin\\clang.exe)"} else {title := "Choose clang"}
+	if p, ok := platform.pick_program(w, title, dir); ok {
+		settings.compiler = strings.clone(p)
+		save_settings()
+		no_compiler_dialog = 0
+		task_start("Checking", check_all_task)
+	}
+}
+
+// SteamOS (the Steam Deck; also what Valve's Holo images are): an Arch Linux whose system is read-only and whose
+// packages come with their headers removed -- glibc is installed but /usr/include/pthread.h & co are not there, and
+// pacman -S --needed skips glibc as up to date, so Clang installs and still cannot build anything.
+is_steamos :: proc() -> bool {
+	data, err := os.read_entire_file_from_path("/etc/os-release", context.temp_allocator)
+	if err != nil {return false}
+	for line in strings.split_lines(string(data), context.temp_allocator) {
+		if strings.trim_space(line) == "ID=steamos" {return true}
+	}
+	return file_exists("/usr/bin/steamos-readonly")
+}
+
+// the C library's headers are missing (SteamOS, or an Arch system set up without them)
+c_headers_missing :: proc() -> bool {return !file_exists("/usr/include/pthread.h") || !file_exists("/usr/include/stdio.h")}
+
+// pacman: the package, and for the compiler glibc's and the kernel's headers reinstalled when they are missing (no
+// --needed for those: they count as installed). SteamOS: its read-only system unlocked first (steamos-readonly
+// disable) and pacman's keyring set up (it is empty on a new Deck: every install would fail its signature check).
+// A SteamOS update puts the read-only system back, without what was installed: then Install again.
+@(private = "file")
+pacman_cmd :: proc(pm, what: string) -> []string {
+	pkg := what == "compiler" ? "clang" : "ffmpeg"
+	steps := make([dynamic]string, context.temp_allocator)
+	if is_steamos() {
+		append(&steps, "(steamos-readonly disable || true)", "(pacman-key --init && pacman-key --populate archlinux holo) || true")
+	}
+	append(&steps, fmt.tprintf("'%s' -S --needed --noconfirm %s", pm, pkg))
+	if what == "compiler" && (c_headers_missing() || is_steamos()) {
+		append(&steps, fmt.tprintf("'%s' -S --noconfirm glibc linux-api-headers", pm))
+	}
+	if len(steps) == 1 {return clone_cmd({pm, "-S", "--needed", "--noconfirm", pkg})}
+	return clone_cmd({"/bin/sh", "-c", strings.join(steps[:], " && ", context.temp_allocator)})
 }

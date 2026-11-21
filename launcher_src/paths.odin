@@ -69,6 +69,7 @@ find_program :: proc(name: string) -> string {
 		if !strings.has_suffix(strings.to_lower(name, context.temp_allocator), ".exe") {exe = strings.concatenate({name, ".exe"}, context.temp_allocator)}
 	}
 	path := os.get_env("PATH", context.temp_allocator)
+	when ODIN_OS == .Windows {path = strings.join({path, registry_path()}, PATH_SEP, context.temp_allocator)}
 	for dir in strings.split(path, PATH_SEP, context.temp_allocator) {
 		if dir == "" {continue}
 		p := pjoin({strings.trim(dir, "\""), exe}, context.temp_allocator)

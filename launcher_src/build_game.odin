@@ -76,6 +76,10 @@ build_task :: proc(t: ^Task, spec: Build_Spec = {}) {
 	logf(t, "Game: %s", game)
 	logf(t, "Compiler: %s", cc)
 
+	// 1. a clean data folder (nothing of an earlier build or launcher stays)
+	if !wipe_data_dir(t) {t.failed = true; return}
+	if cancelled(t) {return}
+
 	// 2. the sources
 	src := data_path("src")
 	n := bundle_extract(t, src, {"gen/", "runtime/", "include/", "ffmpeg/", "vulkan/", "pgo/"})
@@ -415,63 +419,38 @@ cfg_text :: proc() -> string {
 	return strings.to_string(b)
 }
 
-// ---------------------------------------------------------------------------------------------- Delete Last Build
-// The compiled objects of every build: obj/ (the game for this computer) and obj-<target>/ (each Cross-Compile target),
-// in the data folder. Deleting them makes the next Build compile every file again instead of reusing (and linking) the
-// objects of the last one. The built game, its WhiteRecomp.cfg, the saves (cdrive), the unpacked sources and the
-// Android signing key stay.
-build_obj_dirs :: proc() -> [dynamic]string {
-	out := make([dynamic]string, context.temp_allocator)
+// ---------------------------------------------------------------------------------------------- a clean data folder
+// Every Build (and Cross-Compile) starts from a clean data folder: everything in it is deleted first -- the unpacked
+// sources, the objects of every earlier build (this computer's and each Cross-Compile target's), the compiler probe,
+// the tools, the cross files, macOS's built game -- so nothing an older launcher or build left there can stick around.
+// Kept, as nothing can make them again: the saves and the game's own settings (cdrive/), the launcher's settings
+// (settings.txt), the Android signing key (an APK signed with another one cannot update the installed app) and the
+// player's own FFmpeg (ffmpeg/, which the launcher never writes).
+DATA_KEEP :: [?]string{"cdrive", "settings.txt", "android_key.bin", "android_cert.der", "ffmpeg"}
+
+wipe_data_dir :: proc(t: ^Task) -> bool {
 	list, err := os.read_all_directory_by_path(data_dir, context.temp_allocator)
-	if err != nil {return out}
-	for e in list {
-		if e.type == .Directory && (e.name == "obj" || strings.has_prefix(e.name, "obj-")) {append(&out, e.fullpath)}
+	if err != nil {
+		logf(t, "Could not read the data folder %s: %v", data_dir, err)
+		return false
 	}
-	return out
-}
-
-@(private = "file")
-dir_usage :: proc(dir: string) -> (files: int, bytes: i64) {
-	list, err := os.read_all_directory_by_path(dir, context.temp_allocator)
-	if err != nil {return}
-	for e in list {
-		if e.type == .Directory {
-			f, b := dir_usage(e.fullpath)
-			files, bytes = files + f, bytes + b
-		} else {
-			files, bytes = files + 1, bytes + e.size
-		}
-	}
-	return
-}
-
-// what Delete Last Build would delete (for its confirmation)
-clean_plan :: proc() -> (files: int, bytes: i64) {
-	for d in build_obj_dirs() {
-		f, b := dir_usage(d)
-		files, bytes = files + f, bytes + b
-	}
-	return
-}
-
-clean_task :: proc(t: ^Task) {
-	dirs := build_obj_dirs()
-	files, bytes := clean_plan()
-	if len(dirs) == 0 {
-		logf(t, "Nothing to delete: there are no build files.")
-		return
-	}
-	failed := 0
-	for d, i in dirs {
-		set_status(t, f32(i) / f32(len(dirs)), "Deleting %s", filepath.base(d))
-		if err := os.remove_all(d); err != nil {
-			logf(t, "Could not delete %s: %v", d, err)
+	n, failed := 0, 0
+	outer: for e in list {
+		for k in DATA_KEEP {if strings.equal_fold(e.name, k) {continue outer}}
+		set_status(t, 0, "Clearing the data folder: %s", e.name)
+		// (a link is deleted, not what it points to)
+		r := e.type == .Directory ? os.remove_all(e.fullpath) : os.remove(e.fullpath)
+		if r != nil {
+			logf(t, "Could not delete %s: %v", e.fullpath, r)
 			failed += 1
+		} else {
+			n += 1
 		}
 	}
 	if failed > 0 {
-		t.failed = true
-		return
+		log_line(t, "The data folder could not be cleared: close any program using its files and Build again.")
+		return false
 	}
-	logf(t, "Deleted the last build's files: %d files, %.0f MB. The next Build compiles everything again.", files, f64(bytes) / 1e6)
+	logf(t, "Cleared the data folder %s (%d items deleted; the saves, settings, Android key and ffmpeg/ stay).", data_dir, n)
+	return true
 }
