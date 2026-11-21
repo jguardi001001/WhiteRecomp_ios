@@ -41,7 +41,6 @@ child_kill :: proc(c: Child) {
 }
 
 // a command as one shell line (for osascript's "do shell script")
-@(private = "file")
 sh_quote :: proc(cmd: []string) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	for a, i in cmd {

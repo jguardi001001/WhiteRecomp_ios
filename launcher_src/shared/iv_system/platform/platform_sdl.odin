@@ -54,9 +54,21 @@ window_of_id :: proc(id: u32) -> ^Window {
 
 // ---- windows ----
 
+// Why the last create_window failed ("" when it did not), and whether that was because there is no SDL2 to load (the
+// program can then have it installed, call window_retry and try again).
+window_error: string
+window_sdl_missing: bool
+
+// The next create_window loads SDL2 again (after a failed one: SDL2 since installed).
+window_retry :: proc() {
+	if !sdl.loaded {sdl.tried = false; sdl.error = ""}
+}
+
 create_window :: proc(desc: Window_Desc, allocator := context.allocator) -> (w: ^Window, ok: bool) {
 	if !sdl_load(desc.app_id) {
 		fmt.eprintfln("iv_system: no window: %s", sdl.error)
+		window_error = sdl.error
+		window_sdl_missing = sdl.lib == nil
 		return nil, false
 	}
 	w = new(Window, allocator)
@@ -98,6 +110,7 @@ make_sdl_window :: proc(w: ^Window, flags: Window_Flags) -> bool {
 	}
 	if win == nil {
 		fmt.eprintfln("iv_system: no window: %s", sdl.GetError())
+		window_error = strings.clone_from_cstring(sdl.GetError())
 		return false
 	}
 	w.sdl_window = win

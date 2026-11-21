@@ -406,10 +406,11 @@ clone_cmd :: proc(cmd: []string) -> []string {
 	return out
 }
 
-// The distribution's package manager and the command that installs what: "compiler" or "ffmpeg".
-@(private = "file")
+// The distribution's package manager and the command that installs what: "compiler", "ffmpeg", "wine" or "sdl2" (the
+// launcher's own window: nowindow_posix.odin).
 linux_install_cmd :: proc(what: string) -> (pm: string, cmd: []string) {
 	if p := find_program("apt-get"); p != "" {
+		if what == "sdl2" {return "apt", clone_cmd({p, "install", "-y", "libsdl2-2.0-0"})}
 		if what == "compiler" {return "apt", clone_cmd({p, "install", "-y", "clang", "libc6-dev"})}
 		if what == "wine" { // (its 32-bit half, wine32, is an i386 package: that architecture added first)
 			return "apt", clone_cmd({"/bin/sh", "-c", fmt.tprintf("dpkg --add-architecture i386 && '%s' update && '%s' install -y wine wine32:i386", p, p)})
@@ -417,6 +418,7 @@ linux_install_cmd :: proc(what: string) -> (pm: string, cmd: []string) {
 		return "apt", clone_cmd({p, "install", "-y", "ffmpeg"})
 	}
 	if p := find_program("dnf"); p != "" {
+		if what == "sdl2" {return "dnf", clone_cmd({p, "install", "-y", "SDL2"})}
 		if what == "compiler" {return "dnf", clone_cmd({p, "install", "-y", "clang", "glibc-devel"})}
 		if what == "wine" {return "dnf", clone_cmd({p, "install", "-y", "wine"})}
 		return "dnf", clone_cmd({p, "install", "-y", "ffmpeg-free"})
@@ -425,6 +427,7 @@ linux_install_cmd :: proc(what: string) -> (pm: string, cmd: []string) {
 		return "pacman", pacman_cmd(p, what)
 	}
 	if p := find_program("zypper"); p != "" {
+		if what == "sdl2" {return "zypper", clone_cmd({p, "--non-interactive", "install", "libSDL2-2_0-0"})}
 		if what == "compiler" {return "zypper", clone_cmd({p, "--non-interactive", "install", "clang", "glibc-devel"})}
 		if what == "wine" {return "zypper", clone_cmd({p, "--non-interactive", "install", "wine"})}
 		return "zypper", clone_cmd({p, "--non-interactive", "install", "ffmpeg"})
@@ -510,7 +513,7 @@ c_headers_missing :: proc() -> bool {return !file_exists("/usr/include/pthread.h
 // A SteamOS update puts the read-only system back, without what was installed: then Install again.
 @(private = "file")
 pacman_cmd :: proc(pm, what: string) -> []string {
-	pkg := what == "compiler" ? "clang" : what == "wine" ? "wine" : "ffmpeg"
+	pkg := what == "compiler" ? "clang" : what == "wine" ? "wine" : what == "sdl2" ? "sdl2" : "ffmpeg"
 	steps := make([dynamic]string, context.temp_allocator)
 	if is_steamos() {
 		append(&steps, "(steamos-readonly disable || true)", "(pacman-key --init && pacman-key --populate archlinux holo) || true")

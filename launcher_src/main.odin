@@ -165,10 +165,24 @@ main :: proc() {
 		}
 	}
 
-	app, ok := iv.open({title = "WhiteRecomp", width = 1080, height = 760, min_width = 820, min_height = 640, background = [3]u8{WIN_BG.r, WIN_BG.g, WIN_BG.b}})
-	if !ok {
-		fmt.eprintln("WhiteRecomp: could not open a window")
-		os.exit(1)
+	win_desc := platform.Window_Desc{title = "WhiteRecomp", width = 1080, height = 760, min_width = 820, min_height = 640, background = [3]u8{WIN_BG.r, WIN_BG.g, WIN_BG.b}}
+	app, ok := iv.open(win_desc)
+	when ODIN_OS != .Windows {
+		// (the reason in a dialog, a launcher started from a file manager has no terminal; SDL2 offered for installing
+		// when it is missing, and the window tried again: nowindow_posix.odin)
+		if !ok && no_window_help() {
+			app, ok = iv.open(win_desc)
+			if !ok {no_window_help(offer_install = false)}
+		}
+		if !ok {
+			fmt.eprintfln("WhiteRecomp: could not open a window: %s", platform.window_error)
+			os.exit(1)
+		}
+	} else {
+		if !ok {
+			fmt.eprintln("WhiteRecomp: could not open a window")
+			os.exit(1)
+		}
 	}
 	defer iv.close(app)
 
