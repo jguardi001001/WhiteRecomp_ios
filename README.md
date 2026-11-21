@@ -29,7 +29,7 @@ Put the launcher in a folder of its own. **Build** creates the game beside it.
 3. **Options** (optional). See [Options](#options) below.
 4. **Build.** This compiles the game, which takes a few minutes. The result is `WhiteRecomp.exe` (Linux: `WhiteRecomp`) beside the launcher, with `WhiteRecomp.cfg` next to it, which records where your game and saves are.
 5. **Run** starts the game. You can also start `WhiteRecomp.exe` directly.
-6. **Convert Movies** (recommended; Windows only for now). This converts the game's cutscenes to MP4, once. It takes about an hour and can be stopped and resumed.
+6. **Convert Movies** (recommended; on Linux and macOS it needs Wine). This converts the game's cutscenes to MP4, once. There are about 7 hours of them (English and Japanese), so it takes a while, but it can be stopped and resumed.
 7. **Discard Movies** (optional). Once the MP4s exist, this frees about 40 GB by cutting the original movie files down.
 
 **As AppImage** (Linux launchers: the switch above **Build**). When it's on, Build makes one file, `WhiteRecomp-x86_64.AppImage` (or `-aarch64` on ARM64), instead of `WhiteRecomp` and its `WhiteRecomp.cfg`: the game, its settings and an icon packed into a single program you can keep anywhere. **Run** starts it. AppImages open through FUSE (`libfuse2` / `libfuse2t64`); without it, Run has the AppImage unpack itself to a temporary folder first. With `mksquashfs` installed (`squashfs-tools`) the AppImage is compressed (about a third of the size); without it, it's packed uncompressed.
@@ -48,7 +48,7 @@ Every **Build** (and Cross-Compile build) starts by clearing the launcher's data
   - **Steam Deck (SteamOS):** SteamOS removes the C headers from its system, so Clang alone can't build anything. The launcher's **Install it for me** unlocks SteamOS's read-only system, installs Clang and puts the headers back (it asks for your password: set one first with `passwd` in Konsole if you haven't). A SteamOS update undoes this; press Install it for me again afterwards.
 - **A GPU with Vulkan 1.3.**
 - **SDL2 (Linux):** the launcher's window and the game both use it, on Wayland or X11. Most desktops already have it; otherwise install `libsdl2-2.0-0` (Ubuntu, Debian), `SDL2` (Fedora) or `sdl2` (Arch). The macOS app carries its own.
-- **Movies:** converting them works on Windows only for now, and the launcher brings the FFmpeg program it needs. Playing converted movies needs no FFmpeg program, because the game has FFmpeg's libraries built in.
+- **Movies:** the converter is a 32-bit Windows program that uses the game's own Bink DLL. On Linux (x86-64) and macOS it runs through **Wine**, which must run 32-bit programs (Wine 9 or later; on Debian and Ubuntu also `wine32`; on Apple silicon Macs also Rosetta 2). The Requirements list finds Wine and can install it. The launcher brings the FFmpeg program it needs (the Windows one, for Wine), and gives Wine a folder of its own in the launcher's data folder, so your own Wine setup isn't touched. On ARM64 Linux, convert on another PC. Playing converted movies needs no FFmpeg program, because the game has FFmpeg's libraries built in.
 - **Steam achievements and overlay (Windows, Linux):** have Steam running and signed in when you start the game. See [Steam Integration](#steam-integration).
 
 ## macOS
@@ -58,7 +58,7 @@ macOS support is new and has not been run on a Mac yet. Reports of what works an
 - **The game files:** FINAL FANTASY XIII on Steam is a Windows game, so Steam for macOS won't install it. Copy the `FINAL FANTASY XIII` folder from a Windows PC (or from a CrossOver or Whisky install of Steam), then pick it with **Browse…**.
 - **What Build makes:** a native game for your Mac (ARM64 on Apple silicon, x86-64 on Intel Macs) in `~/Library/Application Support/ff13-launcher/game`, not beside the launcher (nothing may be added inside a signed app). **Run** starts it.
 - **Graphics, sound and controllers:** the app carries MoltenVK (Vulkan on Apple's Metal) and SDL2, and the launcher and the game use those.
-- **Not on macOS:** Convert Movies (convert them on a Windows PC first: the MP4s travel with the game folder), Steam achievements and the overlay, and the Debug & Profile Tools' profiler.
+- **Not on macOS:** Steam achievements and the overlay, and the Debug & Profile Tools' profiler.
 
 ## Options
 
@@ -138,6 +138,8 @@ How the game finds controllers. FINAL FANTASY XIII only reads DirectInput contro
 #### Cutscenes
 
 FINAL FANTASY XIII's cutscenes are Bink 2 videos, which the port can't play directly. Each one is converted to an MP4 once. **Convert Movies** on the Home tab does them all, and while you play the game also converts missing ones quietly in the background, one at a time.
+
+Many movie files hold several cutscenes one after another (`z016_us.win32.wmp` holds 8). Each cutscene gets its own MP4: the first one `<name>.mp4`, the others `<name>_<offset>.mp4`. Older launchers converted only the first cutscene of each file, so later scenes played the wrong video under their subtitles, or were skipped (and `z004` never finished converting). MP4s converted now come with a `.v10` file in the movie folder. When the launcher starts and finds MP4s without it, it deletes them and asks you to run **Convert Movies** again. If you used **Discard Movies** with an older launcher, those cutscenes were cut out of the files: have Steam restore them first (Properties > Installed Files > Verify integrity of game files), then Convert Movies.
 
 - **Play if converted** (default): a cutscene plays once its MP4 exists. Until then it's skipped.
 - **Auto-skip:** every cutscene is skipped, even converted ones, which is handy for replays and speedruns. Background conversion continues, so the movies are ready if you switch back (followed by a new Build).

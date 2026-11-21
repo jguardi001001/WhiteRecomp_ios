@@ -11,7 +11,8 @@
 #      static libraries for the target with their headers and license (third_party/ffmpeg: the game links them, for
 #      the movies), the movie converter (build/bink2mp4.exe: tools/bink2mp4/build.sh) and the Steam achievements helper
 #      (build/steamhelper.exe: tools/steamhelper/build.sh); Windows also the ffmpeg.exe it
-#      encodes with (third_party/ffmpeg_exe: a static GPL build, run as its own program). Both also carry what the
+#      encodes with (third_party/ffmpeg_exe: a static GPL build, run as its own program), Linux x86-64 and macOS the
+#      same one as tools/wine/ffmpeg.exe (the converter runs through Wine there: launcher/wine.odin). Both also carry what the
 #      Cross-Compile tab (cross.odin) builds for Linux ARM64 with: its system files (build/arm64_tools/sysroot_min:
 #      tools/arm64_toolchain.sh) and its FFmpeg (third_party/ffmpeg/lib/linux_arm64), as cross/linux_arm64/. Each
 #      target has its own bundle (their FFmpeg libraries differ), kept in its staging folder.
@@ -56,10 +57,10 @@ glibc_check() {
 
 for T in $TARGETS; do
 	case $T in
-	windows) FFP=windows_amd64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_build"; FFEXE=third_party/ffmpeg_exe/windows_amd64 ;;
-	linux) FFP=linux_amd64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_linux"; FFEXE="" ;;
-	linux_arm64) FFP=linux_arm64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_linux_arm64"; FFEXE="" ;;
-	macos) FFP=darwin_arm64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_macos"; FFEXE="" ;;
+	windows) FFP=windows_amd64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_build"; FFEXE=third_party/ffmpeg_exe/windows_amd64; FFDST=tools ;;
+	linux) FFP=linux_amd64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_linux"; FFEXE=third_party/ffmpeg_exe/windows_amd64; FFDST=tools/wine ;;
+	linux_arm64) FFP=linux_arm64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_linux_arm64"; FFEXE=""; FFDST=tools ;;
+	macos) FFP=darwin_arm64; STAGE="$(wslpath "$WTEMP")/ff13_launcher_macos"; FFEXE=third_party/ffmpeg_exe/windows_amd64; FFDST=tools/wine ;;
 	esac
 	# (macOS: one launcher for both kinds of Mac, so both FFmpegs: lib/ Apple silicon's, lib_x86_64/ Intel's)
 	FFX86=""; [ "$T" = macos ] && FFX86="$(M third_party/ffmpeg/lib/darwin_amd64)=ffmpeg/lib_x86_64"
@@ -88,7 +89,7 @@ for T in $TARGETS; do
 			"$(M build/arm64_tools/sysroot_min)=cross/linux_arm64/sysroot" \
 			"$(M third_party/ffmpeg/lib/linux_arm64)=cross/linux_arm64/ffmpeg/lib" \
 			"$(M build/android_sysroot/sysroot)=cross/android_arm64/sysroot" "$(M build/android_sysroot/apk)=cross/android_arm64/apk" \
-			${FFEXE:+"$(M $FFEXE/ffmpeg.exe)=tools/ffmpeg.exe" "$(M $FFEXE/LICENSE)=tools/ffmpeg-LICENSE.txt" "$(M $FFEXE/README.txt)=tools/ffmpeg-README.txt"} || exit 1
+			${FFEXE:+"$(M $FFEXE/ffmpeg.exe)=$FFDST/ffmpeg.exe" "$(M $FFEXE/LICENSE)=$FFDST/ffmpeg-LICENSE.txt" "$(M $FFEXE/README.txt)=$FFDST/ffmpeg-README.txt"} || exit 1
 		# each block compressed by xz (LZMA, its dictionary the whole block), cached by its contents in build/bundle_cache:
 		# the targets share most blocks (the translated code), and a rebuild compresses only the blocks that changed
 		mkdir -p build/bundle_cache

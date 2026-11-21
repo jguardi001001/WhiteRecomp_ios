@@ -1,27 +1,90 @@
-// Convert Movies: every Bink 2 movie of the install (white_data/movie/*.wmp) to an MP4 next to it, once, with the
+// Convert Movies: every Bink 2 movie of the install (white_data/movie/*.wmp) to MP4s next to it, once, with the
 // bundled converter (tools/bink2mp4: the game's own bink2w32.dll decodes, FFmpeg encodes; see its source). The game
-// then plays the MP4s (src/runtime/hle_bink.c). A movie that already has its MP4 is skipped, so it can be cancelled
-// and run again. Windows only for now (the converter is a 32-bit Windows program around the game's Windows DLL).
+// then plays the MP4s (src/runtime/hle_bink.c). A .wmp holds one Bink stream or several, one after the other
+// (z016_us: 8 cutscenes); the game seeks to the one it plays. Each stream gets its own MP4: the first <name>.mp4,
+// the one at byte offset N <name>_N.mp4. A movie whose streams all have their MP4 is skipped, so it can be cancelled
+// and run again. The converter is a 32-bit Windows program around the game's Windows DLL: on Linux and macOS it runs
+// through Wine (wine.odin).
 //
-// Discard Old Movies: frees the space of the .wmp files (about 40 GB) once their MP4s exist. Each .wmp is cut down to
-// its first 4 KB instead of deleted: the game still opens the .wmp to find a movie, and reads the frame count and
-// rate from its header; the pictures and sound come from the MP4. A movie without an MP4 is left whole.
+// Discard Old Movies: frees the space of the .wmp files (about 40 GB) once all their MP4s exist. Each .wmp is cut
+// down to its first 4 KB instead of deleted: the game still opens the .wmp to find a movie. Its streams' headers
+// (frame counts and rates, which the game's player reads) are kept first in <name>.wmp.heads, a line a stream:
+// "offset frames width height rate rate_div" (src/runtime/host_movie_convert.c reads it). A movie without all its
+// MP4s is left whole.
 package launcher
 
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
+import "core:slice"
 import "core:strconv"
 import "core:strings"
 
 WMP_KEEP :: 4096 // bytes of a discarded .wmp that stay (its header)
 
+Wmp_Stream :: struct {
+	off:                     i64,
+	frames, w, h, num, den: u32,
+	mp4:                     string,
+}
+
 Movie_File :: struct {
-	wmp, mp4: string,
-	size:     i64,
-	has_mp4:  bool,
+	wmp, mp4:  string, // mp4: the first stream's
+	size:      i64,
+	streams:   [dynamic]Wmp_Stream,
+	missing:   int, // streams without their MP4
+	has_mp4:   bool, // every stream has its MP4
 	discarded: bool, // already cut down
-	stub:     bool, // a 16-byte placeholder of the install (no movie)
+	heads:     bool, // discarded with its streams' headers kept (.heads): by this launcher, not an older one
+	stub:      bool, // a 16-byte placeholder of the install (no movie)
+}
+
+// the MP4 of the stream at off (src/runtime/host_movie_convert.c host_movie_stream_mp4: the same names)
+stream_mp4 :: proc(wmp: string, off: i64, allocator := context.temp_allocator) -> string {
+	base := wmp[:len(wmp) - 4]
+	return off == 16 ? strings.concatenate({base, ".mp4"}, allocator) : fmt.aprintf("%s_%d.mp4", base, off, allocator = allocator)
+}
+
+@(private = "file")
+le32 :: proc(b: []u8) -> u32 {return u32(b[0]) | u32(b[1]) << 8 | u32(b[2]) << 16 | u32(b[3]) << 24}
+
+// the streams of a .wmp: from the file (the first at 16, each next one at the previous one's offset + its size + 8),
+// else (cut down) from its .heads
+wmp_streams :: proc(wmp: string, allocator := context.temp_allocator) -> (out: [dynamic]Wmp_Stream, from_heads: bool) {
+	out = make([dynamic]Wmp_Stream, allocator)
+	if f, err := os.open(wmp); err == nil {
+		defer os.close(f)
+		b: [0x30]u8
+		if n, _ := os.read_at(f, b[:16], 0); n == 16 && string(b[:3]) == "WMP" {
+			off: i64 = 16
+			for len(out) < 256 {
+				n, _ = os.read_at(f, b[:], off)
+				if n != len(b) || string(b[:3]) != "KB2" {break}
+				s := Wmp_Stream{off = off, frames = le32(b[8:]), w = le32(b[20:]), h = le32(b[24:]), num = le32(b[28:]), den = le32(b[32:])}
+				append(&out, s)
+				l := le32(b[4:])
+				if l == 0 {break}
+				off += i64(l) + 8
+			}
+		}
+	}
+	if data, err := os.read_entire_file(strings.concatenate({wmp, ".heads"}, context.temp_allocator), context.temp_allocator); err == nil {
+		kept := make([dynamic]Wmp_Stream, allocator)
+		for line in strings.split_lines(string(data), context.temp_allocator) {
+			p := strings.fields(line, context.temp_allocator)
+			if len(p) != 6 {continue}
+			s: Wmp_Stream
+			ok: bool
+			o, _ := strconv.parse_i64(p[0]); s.off = o
+			v: [5]u64
+			for k in 0 ..< 5 {v[k], ok = strconv.parse_u64(p[k + 1]); if !ok {break}}
+			if !ok {continue}
+			s.frames, s.w, s.h, s.num, s.den = u32(v[0]), u32(v[1]), u32(v[2]), u32(v[3]), u32(v[4])
+			append(&kept, s)
+		}
+		if len(kept) > len(out) {return kept, true}
+	}
+	return
 }
 
 list_movies :: proc(game: string, allocator := context.temp_allocator) -> [dynamic]Movie_File {
@@ -32,10 +95,16 @@ list_movies :: proc(game: string, allocator := context.temp_allocator) -> [dynam
 	for e in list {
 		if !strings.has_suffix(strings.to_lower(e.name, context.temp_allocator), ".wmp") {continue}
 		m := Movie_File{wmp = strings.clone(e.fullpath, allocator), size = e.size}
-		m.mp4 = strings.concatenate({e.fullpath[:len(e.fullpath) - 4], ".mp4"}, allocator)
-		m.has_mp4 = file_exists(m.mp4)
-		m.stub = e.size <= 16
-		m.discarded = !m.stub && e.size <= WMP_KEEP
+		if fi, serr := os.stat(e.fullpath, context.temp_allocator); serr == nil {m.size = fi.size} // (a link: the file's size)
+		m.mp4 = stream_mp4(m.wmp, 16, allocator)
+		m.stub = m.size <= 16
+		m.discarded = !m.stub && m.size <= WMP_KEEP
+		if !m.stub {m.streams, m.heads = wmp_streams(m.wmp, allocator)}
+		for &s in m.streams {
+			s.mp4 = stream_mp4(m.wmp, s.off, allocator)
+			if !file_exists(s.mp4) {m.missing += 1}
+		}
+		m.has_mp4 = len(m.streams) > 0 && m.missing == 0
 		append(&out, m)
 	}
 	return out
@@ -51,67 +120,79 @@ Convert_State :: struct {
 conv: Convert_State
 
 convert_task :: proc(t: ^Task) {
-	when ODIN_OS != .Windows {
-		log_line(t, "Converting the movies needs Windows for now (the converter runs the game's own Windows Bink DLL).")
+	game := settings.game_dir
+	ff := dep_get(.FFmpeg)
+	if ok, why := convert_possible(); !ok {
+		log_line(t, why)
 		t.failed = true
 		return
+	}
+	if !write_v10(game) {logf(t, "Could not write %s", v10_path(game))} // (what is converted from here on: one MP4 a stream)
+	todo, old := 0, 0
+	for m in list_movies(game) {
+		if !m.stub && !m.discarded {todo += m.missing}
+		if m.discarded && !m.heads {old += 1}
+	}
+	if old > 0 {
+		logf(t, "%d movies were discarded by an older launcher, which converted only the first of the cutscenes a movie file can hold: the others are gone from them. To get them back, have Steam verify the game's files (Properties > Installed Files > Verify integrity), then Convert Movies again.", old)
+	}
+	if todo == 0 {
+		log_line(t, "Every movie already has its MP4s.")
+		set_status(t, 1, "Nothing to convert")
+		return
+	}
+	if bundle_extract(t, data_dir, {"tools/"}) < 0 {t.failed = true; return}
+	tool := data_path("tools", "bink2mp4.exe")
+	dll := pjoin({game, "white_data", "prog", "win", "bin", "bink2w32.dll"}, context.temp_allocator)
+	dir := movie_dir(game)
+	// as many encoder threads as the Options tab's Cutscene Convert Threads (as the game's background conversion)
+	threads := fmt.tprintf("%d", convert_threads())
+	args := []string{"--dll", win_path(dll), "--ffmpeg", win_path(ff.path), "--threads", threads, "all", win_path(dir), win_path(dir)}
+	cmd: []string
+	wine := ""
+	when ODIN_OS == .Windows {
+		cmd = slice.concatenate([][]string{{tool}, args}, context.temp_allocator)
 	} else {
-		game := settings.game_dir
-		ff := dep_get(.FFmpeg)
-		if !ff.can_encode {
-			log_line(t, "FFmpeg with an H.264 encoder (libx264) is needed: install it first.")
-			t.failed = true
+		// (Linux, macOS: through Wine, wine.odin)
+		wine = dep_get(.Wine).path
+		if !wine_ready(t, wine, tool) {t.failed = true; return}
+		cmd = wine_cmd(wine, slice.concatenate([][]string{{tool}, args}, context.temp_allocator))
+		logf(t, "Converting through %s", wine)
+	}
+	conv = {total = todo}
+	logf(t, "Converting %d cutscenes (all of them: about 7 hours of video, English and Japanese; it can be cancelled and continued later)", todo)
+	set_status(t, 0, "Converting: 0 of %d", todo)
+	logf(t, "Converting with %s thread(s) (Options: Cutscene Convert Threads)", threads)
+	code, started := run(t, cmd, on_line = proc(t: ^Task, line: string) {
+		// "<in>: 1280x736 (out 1280x720), 5160 frames at 29.970 fps, 4 audio tracks -> <out>" starts one,
+		// "  frame N / M (x fps)" is its progress, "  done in N s" ends it
+		l := strings.trim_space(line)
+		if strings.contains(l, " frames at ") && strings.contains(l, " -> ") {
+			conv.current = any_base(l[:strings.index(l, ": ")])
+			set_status(t, f32(conv.done) / f32(max(conv.total, 1)), "Converting %s: cutscene %d of %d", conv.current, conv.done + 1, conv.total)
 			return
 		}
-		todo := 0
-		for m in list_movies(game) {
-			if !m.stub && !m.discarded && !m.has_mp4 {todo += 1}
-		}
-		if todo == 0 {
-			log_line(t, "Every movie already has its MP4.")
-			set_status(t, 1, "Nothing to convert")
-			return
-		}
-		if bundle_extract(t, data_dir, {"tools/"}) < 0 {t.failed = true; return}
-		tool := data_path("tools", "bink2mp4.exe")
-		dll := pjoin({game, "white_data", "prog", "win", "bin", "bink2w32.dll"}, context.temp_allocator)
-		dir := movie_dir(game)
-		conv = {total = todo}
-		logf(t, "Converting %d movies (about an hour and a half of video; it can be cancelled and continued later)", todo)
-		set_status(t, 0, "Converting: 0 of %d", todo)
-		// as many encoder threads as the Options tab's Cutscene Convert Threads (as the game's background conversion)
-		threads := fmt.tprintf("%d", convert_threads())
-		logf(t, "Converting with %s thread(s) (Options: Cutscene Convert Threads)", threads)
-		code, started := run(t, {tool, "--dll", dll, "--ffmpeg", ff.path, "--threads", threads, "all", dir, dir}, on_line = proc(t: ^Task, line: string) {
-			// "<in>: 1280x736 (out 1280x720), 5160 frames at 29.970 fps, 4 audio tracks -> <out>" starts one,
-			// "  frame N / M (x fps)" is its progress, "  done in N s" ends it
-			l := strings.trim_space(line)
-			if strings.contains(l, " frames at ") && strings.contains(l, " -> ") {
-				conv.current = filepath.base(l[:strings.index(l, ": ")])
-				set_status(t, f32(conv.done) / f32(max(conv.total, 1)), "Converting %s: movie %d of %d", conv.current, conv.done + 1, conv.total)
-				return
-			}
-			if strings.has_prefix(l, "done in") {conv.done += 1}
-			if strings.has_prefix(l, "frame ") {
-				parts := strings.fields(l, context.temp_allocator)
-				if len(parts) >= 4 {
-					f, _ := strconv.parse_f64(parts[1])
-					n, _ := strconv.parse_f64(parts[3])
-					if n > 0 {
-						p := (f32(conv.done) + f32(f / n)) / f32(conv.total)
-						set_status(t, p, "Converting %s: movie %d of %d, frame %d of %d", conv.current, conv.done + 1, conv.total, int(f), int(n))
-					}
+		if strings.has_prefix(l, "done in") {conv.done += 1}
+		if strings.has_prefix(l, "frame ") {
+			parts := strings.fields(l, context.temp_allocator)
+			if len(parts) >= 4 {
+				f, _ := strconv.parse_f64(parts[1])
+				n, _ := strconv.parse_f64(parts[3])
+				if n > 0 {
+					p := (f32(conv.done) + f32(f / n)) / f32(conv.total)
+					set_status(t, p, "Converting %s: cutscene %d of %d, frame %d of %d", conv.current, conv.done + 1, conv.total, int(f), int(n))
 				}
 			}
-		})
-		if cancelled(t) {return}
-		if !started || code != 0 {
-			log_line(t, "The converter failed.")
-			t.failed = true
-			return
 		}
-		set_status(t, 1, "Converted %d movies", conv.done)
+	})
+	if wine != "" {wine_stop(t, wine, dir, cancelled(t))} // (a cancel leaves the converter's FFmpeg running under Wine)
+	if cancelled(t) {return}
+	if !started || code != 0 {
+		log_line(t, "The converter failed.")
+		t.failed = true
+		return
 	}
+	set_status(t, 1, "Converted %d cutscenes", conv.done)
 }
 
 // ---------------------------------------------------------------------------------------------- Discard Old Movies
@@ -138,11 +219,21 @@ discard_task :: proc(t: ^Task) {
 		if cancelled(t) {break}
 		if m.stub || m.discarded {continue}
 		if !m.has_mp4 {
-			logf(t, "Kept %s: it has no MP4 yet", filepath.base(m.wmp))
+			logf(t, "Kept %s: %d of its %d cutscenes have no MP4 yet", filepath.base(m.wmp), m.missing, len(m.streams))
 			kept += 1
 			continue
 		}
 		set_status(t, f32(i) / f32(len(list)), "Discarding %s", filepath.base(m.wmp))
+		// the streams' headers first (the game's player needs their frame counts and rates): without them, not cut down
+		{
+			sb := strings.builder_make(context.temp_allocator)
+			for s in m.streams {fmt.sbprintf(&sb, "%d %d %d %d %d %d\n", s.off, s.frames, s.w, s.h, s.num, s.den)}
+			if os.write_entire_file(strings.concatenate({m.wmp, ".heads"}, context.temp_allocator), transmute([]u8)strings.to_string(sb)) != nil {
+				logf(t, "Could not write %s.heads: %s kept", filepath.base(m.wmp), filepath.base(m.wmp))
+				t.failed = true
+				continue
+			}
+		}
 		f, err := os.open(m.wmp, {.Read, .Write})
 		if err == nil {
 			err = os.truncate(f, WMP_KEEP)
@@ -158,4 +249,46 @@ discard_task :: proc(t: ^Task) {
 	}
 	logf(t, "Discarded %d old movies: %.1f GB freed%s", cut, f64(freed) / 1e9, kept > 0 ? fmt.tprintf(" (%d kept: convert them first)", kept) : "")
 	set_status(t, 1, "%.1f GB freed", f64(freed) / 1e9)
+}
+
+// ---------------------------------------------------------------------------------------------- the .v10 mark
+// white_data/movie/.v10: the MP4s there were made by a converter that knows a .wmp can hold several cutscenes (v10:
+// one MP4 a stream). Written when Convert Movies starts, and by the game's own background conversion
+// (src/runtime/host_movie_convert.c). MP4s without it are an older converter's: only each file's first cutscene, so
+// later scenes played the wrong video under their subtitles. The launcher deletes those when it starts
+// (old_movies_cleanup) and asks for a new conversion.
+V10_MARK :: ".v10"
+
+v10_path :: proc(game: string) -> string {return pjoin({movie_dir(game), V10_MARK}, context.temp_allocator)}
+
+write_v10 :: proc(game: string) -> bool {
+	return os.write_entire_file(v10_path(game), transmute([]u8)string("cutscenes converted one MP4 per stream (launcher v10)\n")) == nil
+}
+
+// Without the mark: every MP4 in the movie folder (and any temporary file of a conversion) deleted. deleted: how many
+// MP4s; lost: movies an older Discard Movies cut down, whose later cutscenes are gone (Steam's verify brings them back).
+old_movies_cleanup :: proc(t: ^Task, game: string) -> (deleted: int, lost: int) {
+	if file_exists(v10_path(game)) {return}
+	dir := movie_dir(game)
+	list, err := os.read_all_directory_by_path(dir, context.temp_allocator)
+	if err != nil {return}
+	for e in list {
+		n := strings.to_lower(e.name, context.temp_allocator)
+		if strings.has_suffix(n, ".mp4") || strings.has_suffix(n, ".tmp.pcm") {
+			if os.remove(e.fullpath) == nil {
+				if !strings.contains(n, ".tmp.") {deleted += 1}
+			} else {
+				logf(t, "Could not delete %s", e.name)
+			}
+		}
+	}
+	if deleted == 0 {return}
+	for m in list_movies(game) {
+		if m.discarded && !m.heads {lost += 1}
+	}
+	logf(t, "Deleted %d cutscene MP4s made by an older launcher: it converted only the first cutscene of each movie file, so later scenes played the wrong video. Press Convert Movies to convert them again.", deleted)
+	if lost > 0 {
+		logf(t, "%d movie files were cut down by an older Discard Movies: have Steam verify the game's files (Properties > Installed Files > Verify integrity) before converting.", lost)
+	}
+	return
 }

@@ -38,6 +38,7 @@ Game_State :: struct {
 	ok:        bool,
 	why:       string,
 	to_convert, discardable, kept: int,
+	old_deleted, old_lost: int, // old_movies_cleanup: MP4s of an older converter deleted at start; movies cut down by an older Discard
 	free_bytes: i64,
 }
 game_mutex: sync.Mutex
@@ -66,8 +67,13 @@ refresh_game :: proc(t: ^Task) {
 		g.ok = ok
 		g.why = strings.clone(why)
 		if ok {
+			// MP4s an older converter made (no .v10): deleted, and the player asked to convert again (movies.odin)
+			if deleted, lost := old_movies_cleanup(t, settings.game_dir); deleted > 0 {
+				g.old_deleted, g.old_lost = deleted, lost
+				sync.atomic_store(&reconvert_dialog, true)
+			}
 			for m in list_movies(settings.game_dir) {
-				if !m.stub && !m.discarded && !m.has_mp4 {g.to_convert += 1}
+				if !m.stub && !m.discarded {g.to_convert += m.missing} // (cutscenes: a movie file can hold several)
 			}
 			g.discardable, g.free_bytes, g.kept = discard_plan(settings.game_dir)
 		}
@@ -94,6 +100,7 @@ Tab :: enum {
 }
 tab: Tab
 confirm_discard: bool
+reconvert_dialog: bool // old cutscene MP4s were deleted: asks for a new conversion
 no_compiler_dialog: int // 0 not decided yet, 1 showing, 2 closed
 log_scroll: int // lines up from the end
 frame_wheel: int // this frame's wheel steps
@@ -151,7 +158,7 @@ main :: proc() {
 			thread_join_task()
 			for l in task.log {fmt.println(l)}
 			gs := get_game()
-			fmt.printfln("game ok %v, %d movies to convert, %d discardable (%.1f GB), %d kept", gs.ok, gs.to_convert, gs.discardable, f64(gs.free_bytes) / 1e9, gs.kept)
+			fmt.printfln("game ok %v, %d cutscenes to convert, %d discardable (%.1f GB), %d kept", gs.ok, gs.to_convert, gs.discardable, f64(gs.free_bytes) / 1e9, gs.kept)
 			for c in compilers_get() {fmt.printfln("compiler: %s (%s)%s", c.label, c.path, c.path == settings.compiler ? " -- chosen" : "")}
 			fmt.printfln("options: %v", runtime_option_flags())
 			os.exit(0)
@@ -192,7 +199,7 @@ main :: proc() {
 	for !app.window.close_requested {
 		frame_start := time.tick_now()
 		win_events := iv.pump(app, &ctx)
-		if len(app.window.input) > 0 || win_events != {} || sync.atomic_load(&task.running) || confirm_discard || browser_is_open() {
+		if len(app.window.input) > 0 || win_events != {} || sync.atomic_load(&task.running) || confirm_discard || sync.atomic_load(&reconvert_dialog) || browser_is_open() {
 			last_active = frame_start
 		}
 		mx, my := input.mouse_position(&ctx)
@@ -203,7 +210,7 @@ main :: proc() {
 			no_compiler_dialog = len(compilers_get()) == 0 ? 1 : 2
 		}
 		pick_poll()
-		g.modal = confirm_discard || no_compiler_dialog == 1 || browser_is_open()
+		g.modal = confirm_discard || sync.atomic_load(&reconvert_dialog) || no_compiler_dialog == 1 || browser_is_open()
 		_, wy := input.wheel(&ctx)
 		frame_wheel = int(wy * 3)
 		if !g.modal {log_scroll = max(0, log_scroll + frame_wheel)}
@@ -240,6 +247,7 @@ draw_window :: proc(g: ^Gui, w: ^platform.Window) {
 		draw_cross(g, rest)
 	}
 	if confirm_discard {draw_confirm(g, get_game())}
+	if sync.atomic_load(&reconvert_dialog) && !confirm_discard {draw_reconvert(g, get_game())}
 	if no_compiler_dialog == 1 {draw_no_compiler(g, w)}
 	if browser_is_open() {draw_browser(g, frame_wheel)}
 }
@@ -282,7 +290,8 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	cc_ok := dep_get(.Compiler).path != ""
 	ff := dep_get(.FFmpeg)
 	can_build := !running && gs.ok && cc_ok && !playing
-	can_convert := !running && gs.ok && ff.can_encode && gs.to_convert > 0 && ODIN_OS == .Windows
+	conv_ok, conv_why := convert_possible() // (wine.odin: on Linux and macOS through Wine)
+	can_convert := !running && gs.ok && conv_ok && gs.to_convert > 0
 	can_discard := !running && gs.ok && gs.discardable > 0
 	if button(g, disc_r, "Discard Movies", can_discard) {confirm_discard = true}
 	if button(g, conv_r, "Convert Movies", can_convert) {
@@ -297,7 +306,7 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	// why a button cannot be pressed (or what it would do)
 	busy := running ? "Wait for the current task to finish." : ""
 	tooltip_zone(g, "build", build_r, busy != "" ? busy : playing ? "Close the game first: it cannot be rebuilt while it runs." : !gs.ok ? "Needs the game: choose its folder." : !cc_ok ? "Needs a C compiler." : "Builds the game with the options of the Options tab.")
-	conv_tip := ODIN_OS != .Windows ? "Converting the movies works on Windows only for now." : busy != "" ? busy : !gs.ok ? "Needs the game." : !ff.can_encode ? "Needs FFmpeg with its H.264 encoder (install it above)." : gs.to_convert == 0 ? "Every movie is converted." : fmt.tprintf("Converts the %d movies that have no MP4 yet (it can be cancelled and continued later).", gs.to_convert)
+	conv_tip := busy != "" ? busy : !gs.ok ? "Needs the game." : !conv_ok ? conv_why : gs.to_convert == 0 ? "Every movie is converted." : fmt.tprintf("Converts the %d cutscenes that have no MP4 yet (it can be cancelled and continued later).", gs.to_convert)
 	tooltip_zone(g, "convert", conv_r, conv_tip)
 	disc_tip := busy != "" ? busy : !gs.ok ? "Needs the game." : gs.discardable == 0 ? "Nothing to discard: no Bink movie has its MP4 yet." : fmt.tprintf("Frees %.1f GB: the Bink movies that have their MP4.", f64(gs.free_bytes) / 1e9)
 	tooltip_zone(g, "discard", disc_r, disc_tip)
@@ -321,7 +330,9 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	_, after = ui.cut_top(after, px(g, 10))
 
 	// what the computer needs
-	rows := len(Dep_Kind)
+	// (Wine: only Linux and macOS need it)
+	kinds := ODIN_OS == .Windows ? []Dep_Kind{.Compiler, .FFmpeg} : []Dep_Kind{.Compiler, .FFmpeg, .Wine}
+	rows := len(kinds)
 	dc, after2 := ui.cut_top(after, px(g, 40) + rows * px(g, 48))
 	card(g, dc)
 	di := ui.inset_xy(dc, px(g, 16), px(g, 10))
@@ -330,7 +341,7 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	if button(g, {dh.x + dh.w - px(g, 110), dh.y, px(g, 110), px(g, 28)}, "Check again", !running, f = g.small) {
 		task_start("Checking", check_all_task)
 	}
-	for k, i in Dep_Kind {
+	for k, i in kinds {
 		d := dep_get(k)
 		row := ui.Rect{drows.x, drows.y + i * px(g, 48), drows.w, px(g, 48)}
 		inst, text := ui.cut_right(row, px(g, 250), px(g, 12))
@@ -755,6 +766,35 @@ draw_confirm :: proc(g: ^Gui, gs: Game_State) {
 	if button(g, no, "Keep them") {confirm_discard = false}
 }
 
+
+// old cutscene MP4s deleted at start (movies.odin old_movies_cleanup): asks for a new conversion
+draw_reconvert :: proc(g: ^Gui, gs: Game_State) {
+	g.in_modal = true
+	defer g.in_modal = false
+	box := dialog_box(g, px(g, 560), px(g, gs.old_lost > 0 ? 330 : 270))
+	in_ := ui.inset_xy(box, px(g, 24), px(g, 22))
+	ren.draw_text(g.dl, g.big, "Convert the cutscenes again", {in_.x, in_.y}, TEXT)
+	y := in_.y + g.big.line_height + px(g, 12)
+	text := fmt.tprintf("%d cutscene MP4s made by an older launcher were deleted. Many movie files hold several cutscenes, and the old converter made only the first one of each, so later scenes played the wrong video under their subtitles, or were skipped.", gs.old_deleted)
+	conv_ok, conv_why := convert_possible()
+	if conv_ok {
+		text = fmt.tprintf("%s Press Convert Movies to convert them all again.", text)
+	} else {
+		text = fmt.tprintf("%s Convert Movies cannot run yet: %s", text, conv_why)
+	}
+	y += paragraph(g, g.font, text, {in_.x, y, in_.w, 0}, TEXT, px(g, 2)) + px(g, 12)
+	if gs.old_lost > 0 {
+		paragraph(g, g.font, fmt.tprintf("%d movie files were cut down by an older Discard Movies, and their cutscenes are gone. Have Steam restore them first: Properties > Installed Files > Verify integrity of game files.", gs.old_lost), {in_.x, y, in_.w, 0}, TEXT, px(g, 2))
+	}
+	btns := dialog_buttons(g, box)
+	yes, no := ui.columns(btns, 0, 2, px(g, 8)), ui.columns(btns, 1, 2, px(g, 8))
+	can := !sync.atomic_load(&task.running) && gs.ok && conv_ok && gs.to_convert > 0
+	if button(g, yes, "Convert Movies", can, primary = true) {
+		sync.atomic_store(&reconvert_dialog, false)
+		task_start("Convert Movies", proc(t: ^Task) {convert_task(t); refresh_game(t)})
+	}
+	if button(g, no, can ? "Later" : "OK") {sync.atomic_store(&reconvert_dialog, false)}
+}
 
 draw_no_compiler :: proc(g: ^Gui, w: ^platform.Window) {
 	g.in_modal = true

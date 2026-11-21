@@ -6,6 +6,8 @@
 //               not taken.
 //   FFmpeg      encodes the movies (Convert Movies: libx264 + aac). Playing them needs no FFmpeg program: the game
 //               links FFmpeg's libraries statically (third_party/ffmpeg, bundled)
+//   Wine        (Linux, macOS) runs the movie converter there: it is a 32-bit Windows program around the game's own
+//               Windows Bink DLL (wine.odin). The FFmpeg it runs is then the Windows one the launcher brings.
 // Installs: Windows winget (per user: no administrator), Linux the distribution's package manager (always as
 // administrator: pkexec asks), macOS Xcode's command line tools and Homebrew (neither needs administrator).
 // A dependency whose install needs administrator says so on its button, and only that program is elevated.
@@ -22,6 +24,7 @@ import "shared:iv_system/platform"
 Dep_Kind :: enum {
 	Compiler,
 	FFmpeg,
+	Wine, // (Linux and macOS: runs the Windows converter, wine.odin; not listed on Windows)
 }
 
 Dep :: struct {
@@ -342,6 +345,13 @@ check_ffmpeg :: proc(t: ^Task) -> Dep {
 		d.can_encode = true
 		return d
 	}
+	// (Linux x86-64, macOS: the Windows one, which the converter runs under Wine -- wine.odin; the system's FFmpeg is not used)
+	if bundle_has("tools/wine/ffmpeg.exe") {
+		d.path = strings.clone(data_path("tools", "wine", "ffmpeg.exe"))
+		d.note = "included with the launcher (the Windows FFmpeg: Convert Movies runs it through Wine)"
+		d.can_encode = true
+		return d
+	}
 	fallback := ""
 	for p in ffmpeg_candidates() {
 		out := strings.builder_make(context.temp_allocator)
@@ -401,10 +411,14 @@ clone_cmd :: proc(cmd: []string) -> []string {
 linux_install_cmd :: proc(what: string) -> (pm: string, cmd: []string) {
 	if p := find_program("apt-get"); p != "" {
 		if what == "compiler" {return "apt", clone_cmd({p, "install", "-y", "clang", "libc6-dev"})}
+		if what == "wine" { // (its 32-bit half, wine32, is an i386 package: that architecture added first)
+			return "apt", clone_cmd({"/bin/sh", "-c", fmt.tprintf("dpkg --add-architecture i386 && '%s' update && '%s' install -y wine wine32:i386", p, p)})
+		}
 		return "apt", clone_cmd({p, "install", "-y", "ffmpeg"})
 	}
 	if p := find_program("dnf"); p != "" {
 		if what == "compiler" {return "dnf", clone_cmd({p, "install", "-y", "clang", "glibc-devel"})}
+		if what == "wine" {return "dnf", clone_cmd({p, "install", "-y", "wine"})}
 		return "dnf", clone_cmd({p, "install", "-y", "ffmpeg-free"})
 	}
 	if p := find_program("pacman"); p != "" {
@@ -412,6 +426,7 @@ linux_install_cmd :: proc(what: string) -> (pm: string, cmd: []string) {
 	}
 	if p := find_program("zypper"); p != "" {
 		if what == "compiler" {return "zypper", clone_cmd({p, "--non-interactive", "install", "clang", "glibc-devel"})}
+		if what == "wine" {return "zypper", clone_cmd({p, "--non-interactive", "install", "wine"})}
 		return "zypper", clone_cmd({p, "--non-interactive", "install", "ffmpeg"})
 	}
 	return "", nil
@@ -423,8 +438,13 @@ check_deps_task :: proc(t: ^Task) {
 	choose_compiler()
 	set_status(t, -1, "Looking for FFmpeg")
 	dep_set(.FFmpeg, check_ffmpeg(t))
+	when ODIN_OS != .Windows {
+		set_status(t, -1, "Looking for Wine")
+		dep_set(.Wine, check_wine(t))
+	}
 	for k in Dep_Kind {
 		d := dep_get(k)
+		if k == .Wine && ODIN_OS == .Windows {continue}
 		logf(t, "%s: %s", d.name, d.note)
 	}
 	sync.atomic_store(&deps_checked, true)
@@ -490,7 +510,7 @@ c_headers_missing :: proc() -> bool {return !file_exists("/usr/include/pthread.h
 // A SteamOS update puts the read-only system back, without what was installed: then Install again.
 @(private = "file")
 pacman_cmd :: proc(pm, what: string) -> []string {
-	pkg := what == "compiler" ? "clang" : "ffmpeg"
+	pkg := what == "compiler" ? "clang" : what == "wine" ? "wine" : "ffmpeg"
 	steps := make([dynamic]string, context.temp_allocator)
 	if is_steamos() {
 		append(&steps, "(steamos-readonly disable || true)", "(pacman-key --init && pacman-key --populate archlinux holo) || true")
@@ -501,4 +521,62 @@ pacman_cmd :: proc(pm, what: string) -> []string {
 	}
 	if len(steps) == 1 {return clone_cmd({pm, "-S", "--needed", "--noconfirm", pkg})}
 	return clone_cmd({"/bin/sh", "-c", strings.join(steps[:], " && ", context.temp_allocator)})
+}
+
+// ---------------------------------------------------------------------------------------------- Wine
+// (Linux, macOS) the wine that runs Windows programs: PATH's, then where WineHQ's packages and the macOS apps put it.
+// Found when `wine --version` runs; whether it runs 32-bit programs (the converter is one) is tried when Convert
+// Movies starts (wine.odin wine_ready), since that sets up its folder first.
+@(private = "file")
+wine_candidates :: proc() -> [dynamic]string {
+	c := make([dynamic]string, context.temp_allocator)
+	if p := find_program("wine"); p != "" {append(&c, p)}
+	when ODIN_OS == .Darwin {
+		for app in ([]string{"Wine Stable", "Wine Devel", "Wine Staging"}) {
+			for base in ([]string{"/Applications", pjoin({os.get_env("HOME", context.temp_allocator), "Applications"}, context.temp_allocator)}) {
+				p := pjoin({base, fmt.tprintf("%s.app", app), "Contents", "Resources", "wine", "bin", "wine"}, context.temp_allocator)
+				if file_exists(p) {append(&c, p)}
+			}
+		}
+		for p in ([]string{"/opt/homebrew/bin/wine", "/usr/local/bin/wine"}) {if file_exists(p) {append(&c, p)}}
+	} else {
+		for p in ([]string{"/usr/bin/wine", "/opt/wine-stable/bin/wine", "/opt/wine-staging/bin/wine", "/opt/wine-devel/bin/wine"}) {
+			if file_exists(p) {append(&c, p)}
+		}
+	}
+	// (last: a wine64 alone runs no 32-bit program unless it is a WoW64 build; wine_ready tells)
+	if p := find_program("wine64"); p != "" {append(&c, p)}
+	return c
+}
+
+@(private = "file")
+check_wine :: proc(t: ^Task) -> Dep {
+	d := Dep{name = "Wine", purpose = "runs the movie converter (a Windows program) for Convert Movies"}
+	for p in wine_candidates() {
+		out := strings.builder_make(context.temp_allocator)
+		code, started := run(t, {p, "--version"}, mode = .Quiet, capture = &out)
+		if !started || code != 0 {continue}
+		d.path = strings.clone(p)
+		d.note = fmt.aprintf("%s (%s)", strings.trim_space(strings.to_string(out)), p)
+		return d
+	}
+	d.note = "not found (only Convert Movies needs it)"
+	when ODIN_OS == .Darwin {
+		brew := ""
+		for p in ([]string{"/opt/homebrew/bin/brew", "/usr/local/bin/brew"}) {if file_exists(p) {brew = p}}
+		if brew != "" {
+			d.install = clone_cmd({brew, "install", "--cask", "wine-stable"})
+			d.install_how = "Install Wine (Homebrew)"
+		} else {
+			d.install_how = "Install Homebrew (brew.sh) first, then Wine"
+		}
+	} else {
+		pm, cmd := linux_install_cmd("wine")
+		if pm != "" {
+			d.install = cmd
+			d.install_how = fmt.aprintf("Install Wine (%s)", pm)
+			d.needs_admin = true
+		}
+	}
+	return d
 }
