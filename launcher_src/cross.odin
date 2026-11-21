@@ -251,11 +251,12 @@ draw_cross :: proc(g: ^Gui, r: ui.Rect) {
 		if n, ch := dropdown(g, "xcpu", ctrl, names, sel, active = active); ch {settings.cross_cpu = x.cpus[n].key; changed = true}
 		label(g, g.small, sel == 0 ? (x.android ? "Runs on every 64-bit ARM phone" : "Runs on every ARM64 CPU") : "Faster there, but only that CPU and newer ones", note, DIM)
 	}
-	// Android: the options it is built with whatever the Options tab says (options.odin build_settings)
+	// Android: built with the Options tab as set; Use Android Preset sets it for a phone (options.odin apply_android_preset)
 	if x.android {
 		ctrl, note := next(g, oi, &row, row_h, label_w, ctrl_w, "Settings:")
-		label(g, g.font, "Phone settings", ctrl, TEXT)
-		label(g, g.small, "Forced: 30 fps, 512 shadows, anti-aliasing off, half-res effects, 4 GB memory, -O1, 2 pipeline threads", note, DIM)
+		if button(g, ctrl, "Use Android Preset", active) {apply_android_preset()}
+		tooltip_zone(g, "xpreset", ctrl, "Sets the Options tab for a phone: 960x540, 60 fps, 512 shadows, anti-aliasing off, half-resolution effects, 4 GB memory, -O1, 2 pipeline threads. Builds for this computer use them too.")
+		label(g, g.small, "Sets the Options tab: 960x540, 60 fps, light graphics", note, DIM)
 	}
 	// Compiler and linker
 	{

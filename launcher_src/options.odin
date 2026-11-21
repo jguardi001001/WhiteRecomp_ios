@@ -80,28 +80,34 @@ max_pipe_threads :: proc() -> int {return clamp(os.get_processor_core_count() - 
 best_pipe_threads :: proc() -> int {return clamp(os.get_processor_core_count() / 2, 1, 8)}
 pipe_threads :: proc() -> int {return settings.pipe_threads == 0 ? best_pipe_threads() : clamp(settings.pipe_threads, 1, max_pipe_threads())}
 
-// The options a Build uses: the player's, except for Android (the Cross-Compile tab's Android ARM64), where a phone's
-// are forced whatever the Options tab says -- the lowest graphics but shadows kept (512 shadows, anti-aliasing off,
-// effects at half resolution), 30 fps, 4 GB of memory, -O1 and 2 pipeline build threads (a phone's
-// few big cores go to the game). Resolution, sound and the rest stay the player's.
+// The options a Build uses: the player's, for every target (an Android build too: the Cross-Compile tab's Use Android
+// Preset sets the Options tab to a phone's, apply_android_preset)
+build_settings :: proc(spec: Build_Spec = {}) -> Settings {return settings}
+
+// Use Android Preset (the Cross-Compile tab, Android ARM64): the Options tab set for a phone -- 960x540, 60 fps, the
+// lowest graphics but shadows kept (512 shadows, anti-aliasing off, effects at half resolution), 4 GB of memory, -O1
+// and 2 pipeline build threads (a phone's few big cores go to the game). Sound, cutscenes, tools and the rest stay
+// as they are. They are the Options tab's own settings afterwards (a Build for this computer uses them too), and a
+// built game's .cfg here is rewritten as an Options change would.
+ANDROID_RESOLUTION :: 1 // (960x540: RESOLUTIONS)
+ANDROID_FPS :: 60
 ANDROID_SHADOW_RES :: 512
-ANDROID_FPS :: 30
 ANDROID_OPT_LEVEL :: 1
 ANDROID_PIPE_THREADS :: 2
-build_settings :: proc(spec: Build_Spec = {}) -> Settings {
-	s := settings
-	if spec.cross != nil && spec.cross.android {
-		s.graphics = GRAPHICS_CUSTOM
-		s.shadow_res = ANDROID_SHADOW_RES
-		s.aa_fxaa = true
-		s.aa_quality = 1
-		s.fx_full = false
-		s.fps = ANDROID_FPS
-		s.memory_2gb = false // (4 GB, whatever the Options tab says)
-		s.opt_level = ANDROID_OPT_LEVEL
-		s.pipe_threads = ANDROID_PIPE_THREADS
-	}
-	return s
+apply_android_preset :: proc() {
+	settings.resolution = ANDROID_RESOLUTION
+	settings.fps = ANDROID_FPS
+	settings.graphics = GRAPHICS_CUSTOM
+	settings.shadow_res = ANDROID_SHADOW_RES
+	settings.aa_fxaa = true
+	settings.aa_quality = 1
+	settings.fx_full = false
+	settings.memory_2gb = false
+	settings.opt_level = ANDROID_OPT_LEVEL
+	settings.pipe_threads = ANDROID_PIPE_THREADS
+	save_settings()
+	gdir := game_out_dir()
+	if file_exists(pjoin({gdir, GAME_NAME + ".cfg"}, context.temp_allocator)) {_ = write_cfg(gdir)}
 }
 
 // the flags of every unit (pages and runtime): the host CPU, fast math, LTO, no Linux hardening
