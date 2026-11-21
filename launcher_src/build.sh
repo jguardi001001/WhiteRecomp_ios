@@ -18,7 +18,7 @@
 #   2. odin build, with the iv_* libraries of shared/ as the `shared` collection. odin.exe cannot build on a
 #      \\wsl.localhost path, so the packages are staged under the Windows %TEMP% (like tools/bundle/build.sh).
 #      Linux: odin.exe cross-compiles an object, linked here by clang with Odin's stb libraries (compiled by
-#      clang into the staging folder, as vendor/stb/src/build_stb.sh unix does) and libwayland-client. Linux ARM64: the same for -target:linux_arm64, linked
+#      clang into the staging folder, as vendor/stb/src/build_stb.sh unix does); the window is SDL2's, loaded at run time. Linux ARM64: the same for -target:linux_arm64, linked
 #      by clang with build/arm64_tools' ld (tools/arm64_toolchain.sh), Odin's stb compiled for ARM64 into the staging
 #      folder. Both are compiled and linked against Ubuntu 22.04's C library, build/glibc_sysroot/<arch>
 #      (tools/glibc_sysroot.sh), not this machine's: linked against a new glibc, the launcher asks for its newest
