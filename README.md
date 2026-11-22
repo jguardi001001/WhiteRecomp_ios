@@ -1,5 +1,9 @@
 # WhiteRecomp iOS
 
+<a href="https://ko-fi.com/joshua27658"><img src="https://ko-fi.com/img/githubbutton_sm.svg" width="340" alt="Support this project on Ko-fi"></a>
+
+**Tips & donations:** https://ko-fi.com/joshua27658
+
 **FINAL FANTASY XIII running on iPhone** — an iOS port of
 [WhiteRecomp](https://github.com/ps4star/WhiteRecomp) by **ps4star**, which
 recompiles the Steam PC version of the game into native code.
@@ -7,8 +11,6 @@ recompiles the Steam PC version of the game into native code.
 This fork takes the official WhiteRecomp **v0.0.13** sources and builds them
 for iOS: same translated game, same runtime, with an iOS entry point, touch
 controls, and a small set of patches where iOS differs from macOS.
-
-[!ko-fi](https://ko-fi.com/joshua27658)
 
 > Unofficial fan project. Not affiliated with Square Enix or with the
 > WhiteRecomp project. **No game data is included or distributed** — you must
@@ -193,6 +195,16 @@ This port exists because a lot of people's work lined up. Thank you to
   sessions that turned a macOS launcher into a phone build.
 - And everyone who tested a build, sent a log, and said *"it's black
   screen again"* until it wasn't.
+
+## Support
+
+This is a hobby project, built in spare time. If it brought FFXIII to your
+phone and you'd like to say thanks with a coffee, tips and donations are
+welcome — never expected:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/joshua27658)
+
+https://ko-fi.com/joshua27658
 
 ## License / disclaimer
 
