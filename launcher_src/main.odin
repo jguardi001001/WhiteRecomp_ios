@@ -4,7 +4,8 @@
 //            that needs administrator asks for it then, for that program alone), what is running (task.odin: progress,
 //            a log, Cancel), and in the bottom right corner the buttons:
 //              Build              the game, with the computer's C compiler and the options (build_game.odin); each
-//                                 one first clears the data folder (wipe_data_dir: all but the saves, settings,
+//                                 one compiles only what changed since the last (Clear Cache, left of it, clears the data
+//                                 folder: wipe_data_dir -- all but the saves, settings,
 //                                 Android key and the player's ffmpeg/)
 //              Convert Movies     the Bink movies to MP4, once (movies.odin)
 //              Discard Movies     frees the space of the Bink movies that have their MP4 (movies.odin)
@@ -19,6 +20,7 @@ package launcher
 
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:sync"
 import "core:time"
@@ -41,6 +43,8 @@ Game_State :: struct {
 	to_convert, discardable, kept: int,
 	old_deleted, old_lost: int, // old_movies_cleanup: MP4s of an older converter deleted at start; movies cut down by an older Discard
 	free_bytes: i64,
+	has_mp4, has_bink: bool, // cutscene files there: some converted MP4s; some full .wmp files (not a stub of the install, not discarded)
+	edition: string, // the exe's: "EN" (North America / Europe) or "JP" (the Asian edition; game.odin OTHER_EDITIONS)
 }
 game_mutex: sync.Mutex
 game_state: Game_State
@@ -64,7 +68,8 @@ refresh_game :: proc(t: ^Task) {
 		g.why = settings.game_dir == "" ? "not found: choose its folder" : "that folder has no white_data/prog/win/bin/ffxiiiimg.exe"
 	} else {
 		set_status(t, -1, "Checking the game")
-		ok, why := check_game_exe(game_exe(settings.game_dir))
+		ok, why, edition := check_game_exe(game_exe(settings.game_dir))
+		g.edition = edition
 		g.ok = ok
 		g.why = strings.clone(why)
 		if ok {
@@ -75,7 +80,11 @@ refresh_game :: proc(t: ^Task) {
 			}
 			for m in list_movies(settings.game_dir) {
 				if !m.stub && !m.discarded {g.to_convert += m.missing} // (cutscenes: a movie file can hold several)
+				if !m.stub && !m.discarded {g.has_bink = true}
+				if m.missing < len(m.streams) {g.has_mp4 = true}
 			}
+			// (Bink2 plays them through the game's own bink2w32.dll, beside its exe)
+			if !file_exists(pjoin({filepath.dir(game_exe(settings.game_dir)), "bink2w32.dll"}, context.temp_allocator)) {g.has_bink = false}
 			g.discardable, g.free_bytes, g.kept = discard_plan(settings.game_dir)
 		}
 		logf(t, "Game: %s (%s)", settings.game_dir, ok ? "ready" : why)
@@ -83,6 +92,11 @@ refresh_game :: proc(t: ^Task) {
 	sync.mutex_lock(&game_mutex)
 	game_state = g
 	sync.mutex_unlock(&game_mutex)
+	// (a built game's .cfg follows the cutscene files there now: Discard Movies takes Bink2 away)
+	if g.ok {
+		gdir := game_out_dir()
+		if file_exists(pjoin({gdir, GAME_NAME + ".cfg"}, context.temp_allocator)) {_ = write_cfg(gdir)}
+	}
 }
 
 get_game :: proc() -> Game_State {
@@ -167,7 +181,7 @@ main :: proc() {
 		}
 	}
 
-	win_desc := platform.Window_Desc{title = "WhiteRecomp", width = 1080, height = 760, min_width = 820, min_height = 640, background = [3]u8{WIN_BG.r, WIN_BG.g, WIN_BG.b}}
+	win_desc := platform.Window_Desc{title = "WhiteRecomp", width = 1080, height = 760, min_width = 940, min_height = 640, background = [3]u8{WIN_BG.r, WIN_BG.g, WIN_BG.b}}
 	app, ok := iv.open(win_desc)
 	when ODIN_OS != .Windows {
 		// (the reason in a dialog, a launcher started from a file manager has no terminal; SDL2 offered for installing
@@ -298,9 +312,11 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	}
 	build_r, rest := ui.cut_right(bottom, px(g, 150), px(g, 8))
 	build_r = ui.Rect{build_r.x, build_r.y, build_r.w, px(g, 44)}
-	conv_r, rest2 := ui.cut_right(rest, px(g, 140), px(g, 8))
+	clear_r, restc := ui.cut_right(rest, px(g, 130), px(g, 8))
+	conv_r, rest2 := ui.cut_right(restc, px(g, 140), px(g, 8))
 	disc_r, rest3 := ui.cut_right(rest2, px(g, 140), px(g, 8))
 	cancel_r, _ := ui.cut_right(rest3, px(g, 150), px(g, 8))
+	clear_r = ui.Rect{clear_r.x, clear_r.y + px(g, 6), clear_r.w, px(g, 32)}
 	conv_r = ui.Rect{conv_r.x, conv_r.y + px(g, 6), conv_r.w, px(g, 32)}
 	disc_r = ui.Rect{disc_r.x, disc_r.y + px(g, 6), disc_r.w, px(g, 32)}
 	cancel_r = ui.Rect{cancel_r.x, cancel_r.y + px(g, 6), cancel_r.w, px(g, 32)}
@@ -318,6 +334,11 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	if button(g, build_r, "Build", can_build, primary = true, f = g.bold) {
 		task_start("Build", proc(t: ^Task) {build_task(t)})
 	}
+	// Clear Cache: the data folder cleared (wipe_data_dir: all but the saves, settings, Android key and the player's
+	// ffmpeg/), so the next Build unpacks and compiles everything again
+	if button(g, clear_r, "Clear Cache", !running && !playing) {
+		task_start("Clear Cache", proc(t: ^Task) {if !wipe_data_dir(t) {t.failed = true}})
+	}
 	when ODIN_OS == .Linux {
 		if appimage_switch(g, "appimage", build_r, ai_row, &settings.appimage, !running && !playing) {save_settings()}
 	}
@@ -325,6 +346,7 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	busy := running ? "Wait for the current task to finish." : ""
 	tooltip_zone(g, "build", build_r, busy != "" ? busy : playing ? "Close the game first: it cannot be rebuilt while it runs." : !gs.ok ? "Needs the game: choose its folder." : !cc_ok ? "Needs a C compiler." : "Builds the game with the options of the Options tab.")
 	conv_tip := busy != "" ? busy : !gs.ok ? "Needs the game." : !conv_ok ? conv_why : gs.to_convert == 0 ? "Every movie is converted." : fmt.tprintf("Converts the %d cutscenes that have no MP4 yet (it can be cancelled and continued later).", gs.to_convert)
+	tooltip_zone(g, "clear", clear_r, busy != "" ? busy : playing ? "Close the game first." : "Deletes what earlier Builds left in the data folder (unpacked sources, compiled objects, tools), so the next Build starts over and compiles everything. Saves and settings stay.")
 	tooltip_zone(g, "convert", conv_r, conv_tip)
 	disc_tip := busy != "" ? busy : !gs.ok ? "Needs the game." : gs.discardable == 0 ? "Nothing to discard: no Bink movie has its MP4 yet." : fmt.tprintf("Frees %.1f GB: the Bink movies that have their MP4.", f64(gs.free_bytes) / 1e9)
 	tooltip_zone(g, "discard", disc_r, disc_tip)
@@ -342,6 +364,15 @@ draw_home :: proc(g: ^Gui, w: ^platform.Window, r: ui.Rect) {
 	}
 	l1, l2 := ui.cut_top(info, info.h / 2)
 	label(g, g.bold, "Game folder", l1, TEXT)
+	// the edition, as a small tag after the heading
+	if gs.ok && gs.edition != "" {
+		tx := l1.x + text_w(g.bold, "Game folder") + px(g, 10)
+		tw := text_w(g.small, gs.edition) + px(g, 12)
+		tag := ui.Rect{tx, l1.y + (l1.h - px(g, 20)) / 2, tw, px(g, 20)}
+		fill_round(g, tag, px(g, 4), ACCENT)
+		label(g, g.small, gs.edition, tag, ren.WHITE, center = true)
+		tooltip_zone(g, "edition", tag, gs.edition == "EN" ? "The North America / Europe edition of the game." : "The Asian edition of the game: Space confirms in menus (Enter does not), and it has Japanese voices only.")
+	}
 	loc := settings.game_dir != "" ? settings.game_dir : "not found"
 	if gs.checked && !gs.ok {loc = fmt.tprintf("%s — %s", loc, gs.why)}
 	label(g, g.font, loc, l2, gs.ok || !gs.checked ? DIM : BAD)
@@ -427,7 +458,8 @@ draw_task :: proc(g: ^Gui, r: ui.Rect, running: bool) {
 }
 
 // ---------------------------------------------------------------------------------------------- Options
-CUTSCENE_TIP :: "FINAL FANTASY XIII's cutscenes are Bink 2 videos, which this port cannot play directly: each one is converted to an MP4 once (Convert Movies on the Home tab does them all). A cutscene that has no MP4 yet is skipped.\n\nPlay if converted: a cutscene plays once its MP4 exists, and is skipped until then.\nAuto-skip: every cutscene is skipped, even the converted ones (for replays and speedruns). Converted ones play again if you switch back (with a new Build)."
+CUTSCENE_TIP :: "Play: each cutscene plays from the files Cutscene Files chooses. With MP4, a cutscene that has no MP4 yet is skipped (Convert Movies on the Home tab makes them all).\nAuto-skip: every cutscene is skipped (for replays and speedruns). They play again if you switch back (with a new Build)."
+MOVIE_FILES_TIP :: "FINAL FANTASY XIII's cutscenes are Bink 2 videos (the .wmp files in white_data/movie). Only the kinds your game folder has are offered.\n\nBink2: the game's own videos, played by its own Bink library (bink2w32.dll, translated like the game). Nothing to convert.\nMP4: the MP4s Convert Movies made from them, played by FFmpeg (Windows, Linux, macOS) or the system's decoder (Android). Discard Movies removes the .wmp files afterwards, leaving MP4 the only choice.\n\nNeither there (the .wmp files discarded or missing, and no MP4s): every cutscene is skipped. Have Steam re-install the game (or verify its files) to get them back."
 
 // the options' scroll position (pixels from the top) and its scroll bar's drag
 opt_scroll: int
@@ -611,12 +643,33 @@ draw_options :: proc(g: ^Gui, r: ui.Rect) {
 	}
 	// ---- Cutscenes
 	section(g, oi, &row, "Cutscenes")
-	// Cutscenes (with its tooltip over the whole row)
+	// Cutscene Files: MP4 or Bink2, each offered only if the game has those files (main.odin movie_files); none: grayed
+	// out, and every cutscene skipped (no Build needed to switch: XRC_MOVIES in the .cfg)
+	mf := movie_files()
+	{
+		whole, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Cutscene Files:")
+		gs := get_game()
+		kinds := make([dynamic]Movie_Files, context.temp_allocator)
+		names := make([dynamic]string, context.temp_allocator)
+		if !gs.checked || !gs.ok || gs.has_mp4 {append(&kinds, Movie_Files.MP4); append(&names, "MP4")}
+		if !gs.checked || !gs.ok || gs.has_bink {append(&kinds, Movie_Files.Bink); append(&names, "Bink2")}
+		if mf == .None {
+			dropdown(g, "movie_files", ctrl, {"None found"}, 0, active = false)
+			note_text(g, "No cutscene files: re-install the game fresh from Steam for cutscenes to work", note, BAD)
+		} else {
+			sel := 0
+			for k, i in kinds {if k == mf {sel = i}}
+			if n, ch := dropdown(g, "movie_files", ctrl, names[:], sel, active = active); ch {settings.movie_bink = kinds[n] == .Bink; changed = true; game_changed = true}
+			note_text(g, mf == .Bink ? "The game's own Bink 2 videos, no conversion; no Build needed" : "The MP4s Convert Movies made; no Build needed", note, DIM)
+		}
+		tooltip_zone(g, "movie_files", whole, MOVIE_FILES_TIP)
+	}
+	// Cutscenes (with its tooltip over the whole row): forced to Auto-skip with no cutscene files
 	{
 		whole, ctrl, note := next_row(g, oi, &row, row_h, label_w, ctrl_w, "Cutscenes:")
-		names := []string{"Play if converted", "Auto-skip"}
-		if n, ch := dropdown(g, "cutscenes", ctrl, names, settings.skip_movies ? 1 : 0, active = active); ch {settings.skip_movies = n == 1; changed = true}
-		note_text(g, "Hover for how cutscenes work", note, DIM)
+		names := []string{mf == .Bink ? "Play" : "Play if converted", "Auto-skip"}
+		if n, ch := dropdown(g, "cutscenes", ctrl, names, movie_skip() ? 1 : 0, active = active && mf != .None); ch {settings.skip_movies = n == 1; changed = true}
+		note_text(g, mf == .None ? "No cutscene files to play" : "Hover for how cutscenes work", note, DIM)
 		tooltip_zone(g, "cutscenes", whole, CUTSCENE_TIP)
 	}
 	// ---- Steam (host_steam.c -- Windows: the achievements helper; Linux x86-64: the player's steamclient.so; both: Steam's
@@ -855,3 +908,21 @@ draw_no_compiler :: proc(g: ^Gui, w: ^platform.Window) {
 	}
 	if button(g, ui.columns(btns, i + 1, cols, px(g, 8)), "Close") {no_compiler_dialog = 2}
 }
+
+// Cutscene Files: which cutscene files the game plays -- the choice of the Options tab if the game has those files,
+// else the kind it has. .None: neither (the game is not checked yet: the choice as set). The game then skips every
+// cutscene (movie_skip: -DXRC_SKIP_MOVIES).
+Movie_Files :: enum {
+	None,
+	MP4,
+	Bink,
+}
+movie_files :: proc() -> Movie_Files {
+	gs := get_game()
+	if !gs.checked || !gs.ok {return settings.movie_bink ? .Bink : .MP4}
+	if settings.movie_bink && gs.has_bink {return .Bink}
+	if gs.has_mp4 {return .MP4}
+	if gs.has_bink {return .Bink}
+	return .None
+}
+movie_skip :: proc() -> bool {return settings.skip_movies || movie_files() == .None}

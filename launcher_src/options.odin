@@ -212,7 +212,7 @@ runtime_option_flags :: proc(spec: Build_Spec = {}) -> []string {
 	if !settings.audio {append(&f, "-DXRC_NO_AUDIO")}
 	if !settings.tools {append(&f, "-DXRC_NO_TOOLS")}
 	if !settings.vulkan && ODIN_OS == .Windows && spec.cross == nil {append(&f, "-DXRC_D3D9_DEFAULT")}
-	if settings.skip_movies {append(&f, "-DXRC_SKIP_MOVIES")}
+	if movie_skip() {append(&f, "-DXRC_SKIP_MOVIES")} // (also when the game has no cutscene files: main.odin movie_files)
 	if settings.pad_once {append(&f, "-DXRC_PAD_ONCE")}
 	if settings.experimental {append(&f, "-DXRC_EXPERIMENTAL")}
 	return f[:]

@@ -194,3 +194,26 @@ bundle_extract :: proc(t: ^Task, dir: string, prefixes: []string) -> int {
 	}
 	return job.written
 }
+
+// Deletes the files under dir/<prefix> (each of prefixes) that the bundle does not have: the sources an older bundle
+// unpacked that this one dropped (a Build compiles every page in the folder). Returns how many were deleted.
+bundle_prune :: proc(t: ^Task, dir: string, prefixes: []string) -> int {
+	context.allocator = context.temp_allocator
+	have := make(map[string]bool)
+	for e in bundle_entries {have[e.path] = true}
+	n := 0
+	walk :: proc(t: ^Task, dir, rel: string, have: ^map[string]bool, n: ^int) {
+		list, err := os.read_all_directory_by_path(pjoin({dir, rel}), context.temp_allocator)
+		if err != nil {return}
+		for e in list {
+			r := strings.concatenate({rel, e.name})
+			if e.type == .Directory {
+				walk(t, dir, strings.concatenate({r, "/"}), have, n)
+			} else if !(r in have^) {
+				if os.remove(e.fullpath) == nil {n^ += 1} else {logf(t, "Could not delete the old source %s", e.fullpath)}
+			}
+		}
+	}
+	for p in prefixes {walk(t, dir, p, &have, &n)}
+	return n
+}

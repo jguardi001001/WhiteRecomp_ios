@@ -3,6 +3,8 @@
 // over the data sections, with the ranges and the hash read from the bundled dispatch table (gen/xrc_table.c).
 package launcher
 
+import "core:crypto/sha2"
+import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:slice"
@@ -65,14 +67,19 @@ find_game :: proc() -> string {
 }
 
 // Whether exe is the version the bundled code needs. why: what is wrong.
-check_game_exe :: proc(exe: string) -> (ok: bool, why: string) {
+// Other editions of the same build, which the translated code runs as they are: their data hash (as xrc_data_hash, over
+// xrc_hash_ranges). The runtime has the same list (src/runtime/xrc_rt.c xrc_other_editions, with why).
+//   the region-locked Asian edition (Steam): the same code, one 16-byte edition key different
+OTHER_EDITIONS :: [?]u64{0x9727f06b4c294964}
+
+check_game_exe :: proc(exe: string) -> (ok: bool, why: string, edition: string) {
 	table, tok := bundle_read("gen/xrc_table.c", context.temp_allocator)
-	if !tok {return false, "the launcher's sources are damaged (no dispatch table)"}
+	if !tok {return false, "the launcher's sources are damaged (no dispatch table)", ""}
 	// const XrcRange xrc_hash_ranges[] = {\n\t{0x...u, N},\n...}; ... xrc_data_hash = 0x...ull;
 	t := string(table)
 	at := strings.index(t, "xrc_hash_ranges[] = {")
 	hat := strings.index(t, "xrc_data_hash = 0x")
-	if at < 0 || hat < 0 {return false, "the launcher's sources are damaged (no exe check)"}
+	if at < 0 || hat < 0 {return false, "the launcher's sources are damaged (no exe check)", ""}
 	want, _ := strconv.parse_u64_of_base(t[hat + 18:hat + 34], 16)
 	Range :: struct {va, n: u32}
 	ranges := make([dynamic]Range, context.temp_allocator)
@@ -87,9 +94,9 @@ check_game_exe :: proc(exe: string) -> (ok: bool, why: string) {
 		append(&ranges, Range{u32(va), u32(n)})
 	}
 	d, err := os.read_entire_file(exe, context.temp_allocator)
-	if err != nil {return false, "it cannot be read"}
+	if err != nil {return false, "it cannot be read", ""}
 	u32le :: proc(d: []u8, o: int) -> u32 {return u32(d[o]) | u32(d[o + 1]) << 8 | u32(d[o + 2]) << 16 | u32(d[o + 3]) << 24}
-	if len(d) < 0x400 || d[0] != 'M' || d[1] != 'Z' {return false, "it is not a Windows program"}
+	if len(d) < 0x400 || d[0] != 'M' || d[1] != 'Z' {return false, "it is not a Windows program", ""}
 	pe := int(u32le(d, 0x3c))
 	nsec := int(u32le(d, pe + 6) & 0xffff)
 	base := u32le(d, pe + 24 + 28)
@@ -103,11 +110,53 @@ check_game_exe :: proc(exe: string) -> (ok: bool, why: string) {
 			va := base + u32le(d, o + 12)
 			if r.va == va {off = int(u32le(d, o + 20))}
 		}
-		if off < 0 || off + int(r.n) > len(d) {return false, "it is a different version of the game"}
+		if off < 0 || off + int(r.n) > len(d) {return false, exe_mismatch(exe, d, pe, nsec, sh), ""}
 		for b in d[off:off + int(r.n)] {h = (h ~ u64(b)) * 0x100000001b3}
 	}
-	if h != want {return false, "it is a different version of the game (this launcher needs the Steam release)"}
-	return true, ""
+	others := OTHER_EDITIONS
+	if h != want && !slice.contains(others[:], h) {return false, exe_mismatch(exe, d, pe, nsec, sh), ""}
+	return true, "", h == want ? "EN" : "JP" // (the edition the Home tab shows: North America / Europe, or the Asian one)
+}
+
+// Why an exe is not the one this launcher's code was translated from, as far as the file shows: a 4GB (large-address)
+// patch alone does not change what is checked, so a flag set says the patcher changed more; SteamStub's .bind gone says
+// it was unpacked. With its SHA-256 (for a bug report) and the fix: Steam's own copy back.
+@(private = "file")
+exe_mismatch :: proc(exe: string, d: []u8, pe, nsec, sh: int) -> string {
+	// Steam's record of the install (steamapps/appmanifest_292120.acf, two folders above the game): the depot it has.
+	// The code here is from 292122, "Content NE" (North America / Europe); Steam sells others (the region-locked Asian
+	// one) whose exe is another program -- a fresh install gets that one again, so verifying the files does not help.
+	context.allocator = context.temp_allocator // (filepath.dir allocates)
+	game := filepath.dir(filepath.dir(filepath.dir(filepath.dir(filepath.dir(exe)))))
+	acf := pjoin({filepath.dir(filepath.dir(game)), "appmanifest_292120.acf"})
+	if text, err := os.read_entire_file(acf, context.temp_allocator); err == nil {
+		t := string(text)
+		if at := strings.index(t, "\"InstalledDepots\""); at >= 0 {
+			r := t[at + 17:]
+			q := strings.index(r, "\"")
+			if q >= 0 {
+				r = r[q + 1:]
+				if e := strings.index(r, "\""); e > 0 && r[:e] != "292122" {
+					return fmt.tprintf("it is another regional edition of the game (Steam depot %s; this launcher's code is from the North America / Europe edition, depot 292122): it is not supported yet, and re-installing gets the same one", r[:e])
+				}
+			}
+		}
+	}
+	u32le :: proc(d: []u8, o: int) -> u32 {return u32(d[o]) | u32(d[o + 1]) << 8 | u32(d[o + 2]) << 16 | u32(d[o + 3]) << 24}
+	notes := make([dynamic]string, context.temp_allocator)
+	if u32le(d, pe + 22) & 0x20 != 0 {append(&notes, "4GB-patched")}
+	bind := false
+	for i in 0 ..< nsec {if string(d[sh + 40 * i:][:5]) == ".bind" {bind = true}}
+	if !bind {append(&notes, "Steam's DRM wrapper removed")}
+	sum: [32]u8
+	c: sha2.Context_256
+	sha2.init_256(&c)
+	sha2.update(&c, d)
+	sha2.final(&c, sum[:])
+	hex := strings.builder_make(context.temp_allocator)
+	for b in sum[:8] {fmt.sbprintf(&hex, "%02x", b)}
+	what := len(notes) > 0 ? fmt.tprintf("a modified copy of the game (%s)", strings.join(notes[:], ", ", context.temp_allocator)) : "a different version of the game or a modified copy"
+	return fmt.tprintf("%s, SHA-256 %s…. This launcher needs the Steam release's own ffxiiiimg.exe: in Steam, Properties > Installed Files > Verify integrity of game files, and do not patch it again (WhiteRecomp has its own 4GB mode)", what, strings.to_string(hex))
 }
 
 @(private = "file")

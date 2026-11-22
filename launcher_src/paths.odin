@@ -89,6 +89,7 @@ Settings :: struct {
 	fps:             int, // 30 or 60
 	vulkan:          bool, // Graphics Driver: Vulkan, the default (else Direct3D 9, Windows only)
 	skip_movies:     bool, // Cutscenes: Auto-skip
+	movie_bink:      bool, // Cutscene Files: Bink2 (the game's .wmp files through its translated bink2w32.dll: XRC_MOVIES=bink in the .cfg), else MP4
 	pad_once:        bool, // Gamepad Scanning: Once (-DXRC_PAD_ONCE); else every 2 seconds
 	pipe_threads:    int, // Pipeline Build Threads: the renderer's pipeline builders (XRC_VK_PIPE_THREADS in the .cfg; 0: the best, options.odin)
 	resolution:      int, // Resolution: an index into RESOLUTIONS (options.odin) -- the game's -Width= / -Height=
@@ -152,6 +153,8 @@ load_settings :: proc() {
 			if version >= 2 {settings.vulkan = v == "1" || ODIN_OS != .Windows}
 		case "skip_movies":
 			settings.skip_movies = v == "1"
+		case "movie_files":
+			settings.movie_bink = v == "bink"
 		case "pad_once":
 			settings.pad_once = v == "1"
 		case "pipe_threads":
@@ -213,6 +216,7 @@ save_settings :: proc() {
 	fmt.sbprintf(&b, "fps %d\n", settings.fps)
 	fmt.sbprintf(&b, "vulkan %d\n", settings.vulkan ? 1 : 0)
 	fmt.sbprintf(&b, "skip_movies %d\n", settings.skip_movies ? 1 : 0)
+	fmt.sbprintf(&b, "movie_files %s\n", settings.movie_bink ? "bink" : "mp4")
 	fmt.sbprintf(&b, "pad_once %d\n", settings.pad_once ? 1 : 0)
 	fmt.sbprintf(&b, "pipe_threads %d\n", settings.pipe_threads)
 	keys := GRAPHICS_KEYS

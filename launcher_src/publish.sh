@@ -28,7 +28,7 @@ WINGIT="/mnt/c/Program Files/Git/cmd/git.exe"
 # is only ever shipped inside the launcher executables (embedded bundle.bin), never as files
 no_sources() {
 	bad=$(cd "$1" && { "$WINGIT" ls-files; "$WINGIT" ls-files --others --exclude-standard; } | tr -d '\r' |
-		grep -iE '\.(c|h|cc|cpp|hpp|inc)$|(^|/)bundle\.bin$|(^|/)page_[0-9a-f]+\.' || true)
+		grep -iE '\.(c|h|cc|cpp|hpp|inc)$|(^|/)bundle\.bin$|(^|/)page_[0-9a-f]+\.|(^|/)ffxiiiimg[^/]*\.exe$|(^|/)bink2w32\.dll$|\.wmp$' || true)
 	[ -z "$bad" ] || { echo "publish: $1 has source files that must not be published:"; echo "$bad" | head -20; exit 1; }
 }
 gh_token() {
@@ -189,6 +189,10 @@ bundle.bin
 *.h
 # local test builds of the launchers (not published)
 /builds/
+# the game's own files put here for testing (never published: publish.sh refuses them)
+/ffxiiiimg*.exe
+bink2w32.dll
+*.wmp
 GI
 cat > "$REPO/.gitattributes" <<'GA'
 *.exe binary

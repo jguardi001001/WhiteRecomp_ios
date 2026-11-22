@@ -15,3 +15,7 @@ bundle.bin
 *.h
 # local test builds of the launchers (not published)
 /builds/
+# the game's own files put here for testing (never published: publish.sh refuses them)
+/ffxiiiimg*.exe
+bink2w32.dll
+*.wmp

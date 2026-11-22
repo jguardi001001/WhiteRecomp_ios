@@ -29,16 +29,16 @@ Put the launcher in a folder of its own. **Build** creates the game beside it.
 3. **Options** (optional). See [Options](#options) below.
 4. **Build.** This compiles the game, which takes a few minutes. The result is `WhiteRecomp.exe` (Linux: `WhiteRecomp`) beside the launcher, with `WhiteRecomp.cfg` next to it, which records where your game and saves are.
 5. **Run** starts the game. You can also start `WhiteRecomp.exe` directly.
-6. **Convert Movies** (recommended; on Linux and macOS it needs Wine). This converts the game's cutscenes to MP4, once. There are about 7 hours of them (English and Japanese), so it takes a while, but it can be stopped and resumed.
-7. **Discard Movies** (optional). Once the MP4s exist, this frees about 40 GB by cutting the original movie files down.
+6. **Cutscenes** play straight from the game's own movie files when **Cutscene Files** is set to **Bink2** ([Options > Cutscenes](#cutscenes)); nothing to convert. Or, for MP4: **Convert Movies** (on Linux and macOS it needs Wine) converts the game's cutscenes to MP4, once. There are about 7 hours of them (English and Japanese), so it takes a while, but it can be stopped and resumed.
+7. **Discard Movies** (optional, MP4 only). Once the MP4s exist, this frees about 40 GB by cutting the original movie files down. Bink2 then can't be used any more.
 
 **As AppImage** (Linux launchers: the switch above **Build**). When it's on, Build makes one file, `WhiteRecomp-x86_64.AppImage` (or `-aarch64` on ARM64), instead of `WhiteRecomp` and its `WhiteRecomp.cfg`: the game, its settings and an icon packed into a single program you can keep anywhere. **Run** starts it. AppImages open through FUSE (`libfuse2` / `libfuse2t64`); without it, Run has the AppImage unpack itself to a temporary folder first. With `mksquashfs` installed (`squashfs-tools`) the AppImage is compressed (about a third of the size); without it, it's packed uncompressed.
 
-Every **Build** (and Cross-Compile build) starts by clearing the launcher's data folder (`%LOCALAPPDATA%\ff13-launcher` on Windows, `~/Library/Application Support/ff13-launcher` on macOS, `~/.local/share/ff13-launcher` on Linux), so nothing an older launcher or build left there can cause trouble. Kept: your saves (`cdrive`), the launcher's settings (`settings.txt`), the Android signing key and an FFmpeg you put in `ffmpeg/` yourself. Because of this, each Build compiles everything from scratch. While a task runs, **Cancel** appears left of the buttons.
+A **Build** compiles only what changed since the last one, so a second Build is much quicker than the first. Files an older launcher unpacked that this one no longer has are deleted. **Clear Cache** (left of Build) clears the launcher's data folder (`%LOCALAPPDATA%\ff13-launcher` on Windows, `~/Library/Application Support/ff13-launcher` on macOS, `~/.local/share/ff13-launcher` on Linux): the unpacked sources, the compiled objects and the tools, so the next Build starts over and compiles everything. Use it if a Build behaves strangely after an update. Kept: your saves (`cdrive`), the launcher's settings (`settings.txt`), the Android signing key and an FFmpeg you put in `ffmpeg/` yourself. While a task runs, **Cancel** appears left of the buttons.
 
 ## Requirements
 
-- **FINAL FANTASY XIII from Steam.** WhiteRecomp reads the game program (`ffxiiiimg.exe`, which must be the current Steam version) and all the game's files from your install. It uses the game's own movie decoder (`bink2w32.dll`) once, to convert the movies.
+- **FINAL FANTASY XIII from Steam.** WhiteRecomp reads the game program (`ffxiiiimg.exe`, which must be the current Steam version, unmodified) and all the game's files from your install. It uses the game's own movie decoder (`bink2w32.dll`) to play cutscenes (Bink2) or to convert them (MP4). Both Steam editions work: the North America / Europe one and the region-locked **Asian** one. The Home tab shows which one it found, **EN** or **JP**, after "Game folder". In the Asian edition, **Space** confirms in menus (Enter does not) and the voices are Japanese only; that is how that edition behaves. A patched `ffxiiiimg.exe` (a 4GB patch, for instance) is refused: have Steam restore it (Properties > Installed Files > Verify integrity of game files). WhiteRecomp doesn't need such patches ([Memory](#memory) is 4 GB by default).
 - **Clang** (the C compiler the game is built with).
   - On Windows: LLVM-MinGW, or MSYS2's Clang. Visual C++ can't build the game.
   - On Linux: `clang`, or GCC (`gcc`) if you prefer it.
@@ -135,13 +135,22 @@ How the game finds controllers. FINAL FANTASY XIII only reads DirectInput contro
 
 ### Cutscenes
 
+#### Cutscene Files
+
+Which files the game plays its cutscenes from. FINAL FANTASY XIII's cutscenes are Bink 2 videos (the `.wmp` files in `white_data/movie`). Only the kinds your game folder has are offered:
+
+- **Bink2:** the game's own videos, played by its own Bink library (`bink2w32.dll`, translated like the rest of the game). Nothing to convert. Offered while the `.wmp` files are complete (not cut down by Discard Movies).
+- **MP4:** the MP4s **Convert Movies** made from them, played with FFmpeg's libraries (Windows, Linux, macOS) or the system's decoder (Android). Offered once some exist.
+
+If neither is there (the `.wmp` files discarded or missing, and no MP4s), the option is grayed out, every cutscene is skipped, and the launcher says to re-install the game from Steam (or verify its files) to get them back. Switching needs no new Build. A Build's `WhiteRecomp.cfg` follows what is there: after Discard Movies, the game uses the MP4s.
+
 #### Cutscenes
 
-FINAL FANTASY XIII's cutscenes are Bink 2 videos, which the port can't play directly. Each one is converted to an MP4 once. **Convert Movies** on the Home tab does them all, using every CPU thread but one. The game itself no longer converts anything while you play.
+With **MP4**, each cutscene is converted to an MP4 once. **Convert Movies** on the Home tab does them all, using every CPU thread but one. The game itself no longer converts anything while you play.
 
 Many movie files hold several cutscenes one after another (`z016_us.win32.wmp` holds 8). Each cutscene gets its own MP4: the first one `<name>.mp4`, the others `<name>_<offset>.mp4`. Older launchers converted only the first cutscene of each file, so later scenes played the wrong video under their subtitles, or were skipped (and `z004` never finished converting). MP4s converted now come with a `.v10` file in the movie folder. When the launcher starts and finds MP4s without it, it deletes them and asks you to run **Convert Movies** again. If you used **Discard Movies** with an older launcher, those cutscenes were cut out of the files: have Steam restore them first (Properties > Installed Files > Verify integrity of game files), then Convert Movies.
 
-- **Play if converted** (default): a cutscene plays once its MP4 exists. Until then it's skipped.
+- **Play** (with Bink2) or **Play if converted** (with MP4; default): with MP4, a cutscene plays once its MP4 exists, and is skipped until then.
 - **Auto-skip:** every cutscene is skipped, even converted ones, which is handy for replays and speedruns. Converted ones play again if you switch back (followed by a new Build).
 
 ### Steam

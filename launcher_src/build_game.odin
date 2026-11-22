@@ -62,7 +62,7 @@ build_task :: proc(t: ^Task, spec: Build_Spec = {}) {
 	game := settings.game_dir
 	exe := game_exe(game)
 	set_status(t, 0, "Checking the game")
-	if ok, why := check_game_exe(exe); !ok {
+	if ok, why, _ := check_game_exe(exe); !ok {
 		logf(t, "%s cannot be used: %s.", exe, why)
 		t.failed = true
 		return
@@ -76,14 +76,14 @@ build_task :: proc(t: ^Task, spec: Build_Spec = {}) {
 	logf(t, "Game: %s", game)
 	logf(t, "Compiler: %s", cc)
 
-	// 1. a clean data folder (nothing of an earlier build or launcher stays)
-	if !wipe_data_dir(t) {t.failed = true; return}
-	if cancelled(t) {return}
-
 	// 2. the sources
 	src := data_path("src")
-	n := bundle_extract(t, src, {"gen/", "runtime/", "include/", "ffmpeg/", "vulkan/", "pgo/"})
+	// (no clean data folder first: the objects of the last Build are kept, and only what changed is compiled again --
+	// the Home tab's Clear Cache deletes them; sources an older bundle had and this one does not are deleted)
+	src_dirs := []string{"gen/", "runtime/", "include/", "ffmpeg/", "vulkan/", "pgo/"}
+	n := bundle_extract(t, src, src_dirs)
 	if n < 0 {t.failed = true; return}
+	if pruned := bundle_prune(t, src, src_dirs); pruned > 0 {logf(t, "Deleted %d old source files", pruned)}
 	if cancelled(t) {return}
 	logf(t, "Sources: %s (%d files changed)", src, n)
 	if x != nil { 	// (the target's system files and FFmpeg)
@@ -377,6 +377,7 @@ cfg_game_lines :: proc(b: ^strings.Builder, spec: Build_Spec = {}) {
 	s := build_settings(spec)
 	fmt.sbprintf(b, "XRC_GAME_ARGS=%s\n", game_args(s))
 	fmt.sbprintf(b, "XRC_LANGUAGE=%s\n", s.subs_jp ? "japanese" : "english") // (the text language: Features & Mods > Subtitles)
+	if movie_files() == .Bink {fmt.sbprintf(b, "XRC_MOVIES=bink\n")} // (Cutscene Files: Bink2 -- the game's .wmp files through its translated bink2w32.dll)
 	if s.shadow_res == 0 {fmt.sbprintf(b, "XRC_NO_SHADOWS=1\n")}
 	if s.memory_2gb {fmt.sbprintf(b, "XRC_GUEST_2GB=1\n")}
 	if s.stretch {fmt.sbprintf(b, "XRC_STRETCH=1\n")}
@@ -418,9 +419,10 @@ cfg_text :: proc() -> string {
 }
 
 // ---------------------------------------------------------------------------------------------- a clean data folder
-// Every Build (and Cross-Compile) starts from a clean data folder: everything in it is deleted first -- the unpacked
+// Clear Cache (the Home tab) clears the data folder: everything in it is deleted -- the unpacked
 // sources, the objects of every earlier build (this computer's and each Cross-Compile target's), the compiler probe,
-// the tools, the cross files, macOS's built game -- so nothing an older launcher or build left there can stick around.
+// the tools, the cross files, macOS's built game -- so nothing an older launcher or build left there can stick around
+// (a Build itself keeps them: it compiles only what changed).
 // Kept, as nothing can make them again: the saves and the game's own settings (cdrive/), the launcher's settings
 // (settings.txt), the Android signing key (an APK signed with another one cannot update the installed app) and the
 // player's own FFmpeg (ffmpeg/, which the launcher never writes).

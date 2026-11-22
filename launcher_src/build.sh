@@ -39,6 +39,9 @@ if ! command -v wslpath > /dev/null 2>&1 || ! command -v cmd.exe > /dev/null 2>&
 fi
 cd "$(dirname "$0")/.." || exit 1
 GEN=${LAUNCHER_GEN:-build/xrc_gen} # (the translated code packed: tools/xrc_build.sh's XRC_GEN)
+# the translated bink2w32.dll (Cutscene Files: Bink2): its pages and table beside the game's; the runtime's xrc_bink_dll.c
+# needs them to link
+sh tools/xrc_bink_gen.sh "$GEN/src" || { echo "build.sh: could not translate bink2w32.dll into $GEN/src" >&2; exit 1; }
 ODIN=${ODIN:-/mnt/c/Users/psivstar/Documents/git/odin/odin.exe}
 ODIN_ROOT=$(dirname "$ODIN")
 TARGETS=windows
