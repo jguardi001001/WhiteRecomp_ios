@@ -8,6 +8,8 @@ This fork takes the official WhiteRecomp **v0.0.13** sources and builds them
 for iOS: same translated game, same runtime, with an iOS entry point, touch
 controls, and a small set of patches where iOS differs from macOS.
 
+[!ko-fi](https://ko-fi.com/joshua27658)
+
 > Unofficial fan project. Not affiliated with Square Enix or with the
 > WhiteRecomp project. **No game data is included or distributed** — you must
 > own FINAL FANTASY XIII on Steam and supply your own copy.
