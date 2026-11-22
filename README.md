@@ -1,6 +1,6 @@
 # WhiteRecomp
 
-Extremely optimized re-compilation of FF13 currently targeting x64 Windows, x64/ARM64 Linux and (experimental) macOS, with Android support coming soon.
+Extremely optimized re-compilation of FF13 currently targeting x64 Windows, x64/ARM64 Linux, macOS, and Android.
 
 WhiteRecomp builds a native port of **FINAL FANTASY XIII** on your own computer. It uses your own Steam version of the game to do this.
 
