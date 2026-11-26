@@ -8,6 +8,10 @@
 [WhiteRecomp](https://github.com/ps4star/WhiteRecomp) by **ps4star**, which
 recompiles the Steam PC version of the game into native code.
 
+<img width="1434" height="660" alt="IMG_0714" src="https://github.com/user-attachments/assets/0ce57735-dccc-41d7-81cd-70ad7f1914db" />
+<img width="1434" height="660" alt="IMG_0715" src="https://github.com/user-attachments/assets/d81612b7-d4d8-4c7f-95e7-e925e027e8f2" />
+
+
 This fork takes the official WhiteRecomp **v0.0.13** sources and builds them
 for iOS: same translated game, same runtime, with an iOS entry point, touch
 controls, and a small set of patches where iOS differs from macOS.
